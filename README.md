@@ -178,3 +178,5 @@ This means the top-left of an image is "0,0", and coordinates increase as you tr
 
 2. **temporal_feature_out (occ[1])** (for models above 800m): Temporal output with shape (1,672,6,8), serving as input for the next run.
 
+## Announcement
+I worked on this alone as a hobby for three months. As my limited knowledge and skills, there might be mistakes. Welcome any corrections, and thank you for your understanding.
