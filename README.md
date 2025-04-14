@@ -1,7 +1,7 @@
 <div align="center"><img src="assets/yoloXocc_bar.png" width="320"></div>
 
 ## Introduction
-YOLOXOCC is a 3D detection framework for occupancy networks implemented based on the [YOLOXE](https://github.com/leogift/yoloxe) series of 2D detectors. It draws inspiration from [LSS](https://github.com/nv-tlabs/lift-splat-shoot) and [SimpleBEV](https://github.com/aharley/simple_bev).
+YOLOXOCC is a 3D detection framework for occupancy networks implementation based on the [YOLOXE](https://github.com/leogift/yoloxe) series of 2D detectors. It draws inspiration from [LSS](https://github.com/nv-tlabs/lift-splat-shoot) and [SimpleBEV](https://github.com/aharley/simple_bev).
 
 - **Objectives:**
   - Achieve real-time performance on mainstream embedded NPU platforms like RK3588 when using three camera inputs.
