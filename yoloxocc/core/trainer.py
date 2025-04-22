@@ -381,7 +381,7 @@ class Trainer:
 
         with adjust_status(evalmodel, training=False):
             eval_results = self.exp.eval(
-                    evalmodel, self.evaluator, self.args.fp16
+                    evalmodel, self.evaluator
                 )
         
         if self.rank == 0:

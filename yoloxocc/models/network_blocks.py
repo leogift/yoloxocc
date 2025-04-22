@@ -205,32 +205,26 @@ class CrossAttention(nn.Module):
         self.head_dim   = self.dim // heads
         self.scale      = self.head_dim ** (-0.5)
 
-        self.q_norm     = RMSNorm(q_dim)
-        self.kv_norm    = RMSNorm(kv_dim)
-        self.q          = nn.Conv2d(q_dim, self.dim, kernel_size=1, bias=True)
-        self.kv         = nn.Conv2d(kv_dim, 2*self.dim, kernel_size=1, bias=True)
+        self.q          = BaseConv(q_dim, self.dim, 1, stride=1, act="")
+        self.kv         = BaseConv(kv_dim, 2*self.dim, 1, stride=1, act="")
         self.attn_drop  = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
 
         self.proj       = nn.Conv2d(self.dim, q_dim, kernel_size=1, bias=True)
-        self.proj_drop  = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
     def forward(self, x, y):
         B, _, H, W = x.shape
 
         # B,C,H,W -> B,C,H,W
-        q = self.q(self.q_norm(x))
-        # B,C,H,W -> B,H,W,C
-        q = q.permute(0,2,3,1).contiguous()
+        q = self.q(x)
+        # B,C,H,W -> B,H,W,C -> B,H*W,C
+        q = q.permute(0,2,3,1).view(B, H*W, -1).contiguous()
 
         # B,C,H,W -> B,C,H,W
-        kv = self.kv(self.kv_norm(y))
+        kv = self.kv(y)
         k,v = kv.split((self.dim, self.dim), 1)
-        # B,C,H,W -> B,H,W,C
-        k = k.permute(0,2,3,1).contiguous()
-        v = v.permute(0,2,3,1).contiguous()
-        # B,H,W,C -> B,H*W,C
-        k = k.view(B, H*W, -1)
-        v = v.view(B, H*W, -1)
+        # B,C,H,W -> B,H,W,C -> B,H*W,C
+        k = k.permute(0,2,3,1).view(B, H*W, -1).contiguous()
+        v = v.permute(0,2,3,1).view(B, H*W, -1).contiguous()
 
         #  B,H*W,C ->  B,H*W,Head,C/Head -> B,Head,H*W,C/Head
         q = q.view(B, -1, self.heads, self.head_dim).transpose(1, 2).contiguous()
@@ -247,7 +241,6 @@ class CrossAttention(nn.Module):
         # B,N,C => B,C,N => B,C,H,W
         proj = proj.transpose(1, 2).contiguous().view(B,self.dim,H,W)
         proj = self.proj(proj)
-        proj = self.proj_drop(proj)
 
         return proj
 
@@ -273,20 +266,16 @@ class Mlp(nn.Module):
         drop_rate=0.
     ):
         super().__init__()
-        self.norm   = RMSNorm(dim)
-        self.fc1    = nn.Conv2d(dim, dim*expansion, kernel_size=1, bias=True)
+        self.fc1    = BaseConv(dim, dim*expansion, 1, stride=1, act=act)
         self.act    = get_activation(act)()
         self.fc2    = nn.Conv2d(dim*expansion, dim, kernel_size=1, bias=True)
         self.drop1   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
-        self.drop2   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
     def forward(self, x):
-        x = self.act(self.fc1(self.norm(x)))
+        x = self.act(self.fc1(x))
         if self.training:
             x = self.drop1(x)
         x = self.fc2(x)
-        if self.training:
-            x = self.drop2(x)
         return x
 
 
@@ -344,10 +333,7 @@ class SelfTransformer(CrossTransformer):
             )
         
     def forward(self, x):
-        y = self.attn(x) + x
-        y = self.mlp(y) + y
-
-        return y
+        return super().forward(x, x)
 
 
 class SEModule(nn.Module):

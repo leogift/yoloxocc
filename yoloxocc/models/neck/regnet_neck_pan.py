@@ -69,6 +69,9 @@ class RegnetNeckPAN(nn.Module):
             act=act,
         )
 
+        initialize_weights(self.csp4)
+        initialize_weights(self.csp5)
+		
         self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
         # last_layer

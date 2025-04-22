@@ -29,7 +29,7 @@ def filter_box(output, scale_range):
     return output[keep]
 
 
-def postprocess(prediction, num_classes, conf_thre=0.5, nms_thre=0.5, num_points=0):
+def postprocess(prediction, num_classes, conf_thre=0.5, nms_thre=0.5):
     box_corner = prediction.new(prediction.shape)
     box_corner[:, :, 0] = prediction[:, :, 0] - prediction[:, :, 2] / 2
     box_corner[:, :, 1] = prediction[:, :, 1] - prediction[:, :, 3] / 2
@@ -37,12 +37,7 @@ def postprocess(prediction, num_classes, conf_thre=0.5, nms_thre=0.5, num_points
     box_corner[:, :, 3] = prediction[:, :, 1] + prediction[:, :, 3] / 2
     prediction[:, :, :4] = box_corner[:, :, :4]
 
-    bbox_output = [None for _ in range(len(prediction))]
-    score_output = [None for _ in range(len(prediction))]
-    cls_output = [None for _ in range(len(prediction))]
-    if num_points > 0:
-        points_output = [None for _ in range(len(prediction))]
-    
+    output = [None for _ in range(len(prediction))]
     for i, image_pred in enumerate(prediction):
 
         # If none are remaining => process next image
@@ -52,48 +47,26 @@ def postprocess(prediction, num_classes, conf_thre=0.5, nms_thre=0.5, num_points
         class_conf, class_pred = torch.max(image_pred[:, 5: 5 + num_classes], 1, keepdim=True)
 
         conf_mask = (image_pred[:, 4] * class_conf.squeeze() >= conf_thre).squeeze()
+        # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred)
+        detections = torch.cat((image_pred[:, :5], class_conf, class_pred.float()), 1)
 
-        # Detections ordered as (x1, y1, x2, y2, obj_conf, class_conf, class_pred, kpts, kpts_conf)
-        bbox = image_pred[:, :4]
-        score = image_pred[:, 4] * class_conf
-        cls = class_pred.float()
-        if num_points > 0:
-            points = image_pred[:, 5 + num_classes:]
-        
-        bbox = bbox[conf_mask]
-        if not bbox.size(0):
+        detections = detections[conf_mask]
+        if not detections.size(0):
             continue
 
         nms_out_index = torchvision.ops.batched_nms(
-            bbox,
-            score,
-            cls,
+            detections[:, :4],
+            detections[:, 4] * detections[:, 5],
+            detections[:, 6],
             nms_thre,
         )
 
-        bbox = bbox[nms_out_index]
-        score = score[nms_out_index]
-        cls = cls[nms_out_index]
-        if num_points > 0:
-            points = points[nms_out_index]
-
-        if bbox_output[i] is None:
-            bbox_output[i] = bbox
-            score_output[i] = score
-            cls_output[i] = cls
-            if num_points > 0:
-                points_output[i] = points
+        detections = detections[nms_out_index]
+        if output[i] is None:
+            output[i] = detections
         else:
-            bbox_output[i] = torch.cat((bbox_output[i], bbox))
-            score_output[i] = torch.cat((score_output[i], score))
-            cls_output[i] = torch.cat((cls_output[i], cls))
-            if num_points > 0:
-                points_output[i] = torch.cat((points_output[i], points))
+            output[i] = torch.cat((output[i], detections))
 
-    output = [bbox_output, score_output, cls_output]
-    if num_points > 0:
-        output += [points_output]
-    
     return output
 
 
@@ -121,9 +94,9 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
 
     en = (inter_tl < inter_br).type(inter_tl.type()).prod(dim=2)
     area_i = torch.prod(inter_br - inter_tl, 2) * en  # * ((tl < br).all())
-    iou = area_i / (area_a[:, None] + area_b - area_i)
 
-    return iou
+    return area_i / (area_a[:, None] + area_b - area_i)
+
 
 def matrix_iou(a, b):
     """

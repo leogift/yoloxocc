@@ -23,16 +23,12 @@ class Evaluator:
 
     def evaluate(
         self, 
-        model, 
-        half=False,
+        model,
     ):
         if not is_main_process():
             return None
 	
-        tensor_type = torch.cuda.HalfTensor if half else torch.cuda.FloatTensor
         model = model.eval()
-        if half:
-            model = model.half()
         outputs_list = []
         inference_time = 0
         n_samples = max(len(self.dataloader) - 1, 1)
@@ -44,7 +40,7 @@ class Evaluator:
             with torch.no_grad():
                 targets = []
                 for target in _targets:
-                    target = target.type(tensor_type)
+                    target = target.type(torch.cuda.FloatTensor)
                     targets.append(target)
 
                 # skip the last iters since batchsize might be not enough for batch inference

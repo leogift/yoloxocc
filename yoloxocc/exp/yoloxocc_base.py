@@ -254,5 +254,5 @@ class Exp(BaseExp):
 
         return Evaluator(dataloader=val_loader)
 
-    def eval(self, model, evaluator, half=False):
-        return evaluator.evaluate(model, half)
+    def eval(self, model, evaluator):
+        return evaluator.evaluate(model)

@@ -7,7 +7,7 @@ __pycache__
 YOLOXOCC_outputs/
 YOLOX_outputs/
 onnx_outputs/
-datasets/
+# datasets/
 
 # do not ignore datasets under yoloxocc/data
 !*yoloxocc/data/datasets/
@@ -232,5 +232,3 @@ pretrain/
 weight/
 
 *.db
-
-*.txt
