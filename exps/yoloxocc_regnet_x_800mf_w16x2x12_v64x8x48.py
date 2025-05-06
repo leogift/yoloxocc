@@ -38,7 +38,6 @@ class Exp(BaseExp):
         self.no_aug_epochs = 20
         self.data_num_workers = 4
         self.eval_epoch_interval = 5
-        self.precise_meter = 0.125
 
 
     def get_model(self):
@@ -58,6 +57,7 @@ class Exp(BaseExp):
                     self.model_name,
                     act=self.act, 
                     pp_repeats=pp_repeats,
+                    transformer=True,
                     drop_rate=0.1,
                 )
             self.channels = backbone.output_channels[-3:]
@@ -85,7 +85,9 @@ class Exp(BaseExp):
                     in_channels=self.channels,
                     act=self.act,
                     pp_repeats=pp_repeats,
+                    transformer=True,
                     drop_rate=0.1,
+                    layer_type=C2kLayer,
                     n=1
                 )
             self.bev_channels = bev_backbone.output_channels[-3:]
@@ -111,7 +113,6 @@ class Exp(BaseExp):
                     act=self.act, 
                     drop_rate=0.1,
                 )
-
             aux_occ_head_list = [
                     AUXOCCHead(
                         in_features=("bev_backbone3", "bev_backbone4", "bev_backbone5"),
@@ -137,7 +138,6 @@ class Exp(BaseExp):
                     aux_occ_head_list=aux_occ_head_list,
                     vox_xyz_size=self.vox_xyz_size,
                     world_xyz_bounds=self.world_xyz_bounds,
-                    precise_meter=self.precise_meter,
                     bev_erase_prob=self.bev_erase_prob,
                     bev_flip_prob=self.bev_flip_prob,
                     bev_mixup_prob=self.bev_mixup_prob,

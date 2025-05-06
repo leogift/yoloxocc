@@ -354,39 +354,3 @@ class CustomDataset(DatasetBase):
     def pull_item_by_token(self, token):
         index = list(self.annotations_dict.keys()).index(token)
         return self.pull_item(index)
-
-
-if __name__ == '__main__':
-    dataset = CustomDataset(       
-        data_dir="custom",
-        sequence_json="sequence.json",
-        camera_list=['front','left','right'],
-        image_size=(288, 512),
-        lidar_list=['top'],
-        category_list=['car', 'pedestrian'],
-        augment=DataAugment(
-            hsv_prob=1,
-            blur_prob=1,
-            erase_prob=1,
-            crop_prob=1,
-        ),
-        max_lidar_points=20000,
-        max_instances=200,
-    )
-
-    print("------------------------------------------------------")
-    test_len = min(3, len(dataset))
-    for i in range(test_len):
-        cameras_image, cameras_extrin, cameras_intrin, \
-            lidars_points, lidars_extrin, \
-            cameras_annos, lidars_annos = dataset.pull_item(i)
-        print("dataset", len(dataset))
-        print("cameras_image", cameras_image.shape)
-        print("cameras_extrin", cameras_extrin.shape, cameras_extrin[0])
-        print("cameras_intrin", cameras_intrin.shape, cameras_intrin[0])
-        print("lidars_points", lidars_points.shape, lidars_points[0, 0:2])
-        print("lidars_extrin", lidars_extrin.shape, lidars_extrin[0])
-        print("cameras_annos", cameras_annos.shape, cameras_annos[0, 0:2])
-        print("lidars_annos", lidars_annos.shape , lidars_annos[0, 0:2])
-        print("------------------------------------------------------")
-    

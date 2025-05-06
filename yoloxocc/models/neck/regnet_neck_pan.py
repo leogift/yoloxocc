@@ -4,7 +4,7 @@
 import torch
 from torch import nn
 
-from yoloxocc.models.network_blocks import get_activation, C2PPLayer, C2aLayer
+from yoloxocc.models.network_blocks import get_activation, C2PPLayer, C2aLayer, SelfTransformer
 from yoloxocc.utils import initialize_weights
 
 import ssl
@@ -22,6 +22,8 @@ class RegnetNeckPAN(nn.Module):
         out_features=("bev_backbone3", "bev_backbone4", "bev_backbone5"),
         act="silu",
         pp_repeats=0,
+        transformer=False,
+        heads=8,
         drop_rate=0.,
         layer_type=C2aLayer,
         n=2,
@@ -33,8 +35,7 @@ class RegnetNeckPAN(nn.Module):
         self.out_features = out_features
 
         # 加载预训练模型
-        self.model = torchvision.models.__dict__[model](weights='IMAGENET1K_V1', 
-            activation=get_activation(act))
+        self.model = torchvision.models.__dict__[model](weights='IMAGENET1K_V1')
 
         # 丢弃分类头
         del self.model.avgpool
@@ -83,8 +84,13 @@ class RegnetNeckPAN(nn.Module):
                 act=act,
                 drop_rate=drop_rate,
             ),
+            nn.Identity() if transformer==False else SelfTransformer(
+                in_channels[2],
+                heads=heads,
+                act=act,
+                drop_rate=drop_rate,
+            ),
         )
-
         initialize_weights(self.last_layer)
 
     def forward(self, inputs):

@@ -9,7 +9,6 @@ from torch import distributed as dist
 from torch import nn
 
 from .dist import get_world_size
-from yoloxocc.models import RMSNorm
 
 ASYNC_NORM = (
     nn.BatchNorm1d,
@@ -19,7 +18,6 @@ ASYNC_NORM = (
     nn.InstanceNorm2d,
     nn.InstanceNorm3d,
     nn.LayerNorm,
-    RMSNorm
 )
 
 __all__ = [

@@ -7,14 +7,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import math
 
-# focal loss
-class FocalLoss(nn.Module):
-    def __init__(self, gamma=2.0, alpha=0.25, reduction="none"):
+class BCEWithLogitsLoss(nn.Module):
+    def __init__(self, reduction="none", pos_weight=torch.Tensor([1])):
         super().__init__()
         assert reduction in [ None, 'none', 'mean', 'sum']
-        self.gamma = gamma
-        self.alpha = alpha
         self.reduction = reduction
+        self.pos_weight = pos_weight
 
     '''
     Args:
@@ -22,7 +20,42 @@ class FocalLoss(nn.Module):
         target: tensor
     '''
     def forward(self, pred, target):
-        assert pred.shape[0] == target.shape[0], \
+        assert pred.shape == target.shape, \
+            f"expect {pred.shape} == {target.shape}"
+        if pred.shape[0] == 0:
+            loss = torch.ones([1, target.shape[1:]], device=pred.device) * target.shape[1:]
+
+        else:
+            loss = F.binary_cross_entropy_with_logits(
+                pred, target, 
+                pos_weight=self.pos_weight.to(pred.device),
+                reduction="none")
+
+        if self.reduction == "sum":
+            loss = loss.sum()
+        elif self.reduction == "mean":
+            loss = loss.mean()
+
+        return loss
+
+
+# focal loss
+class FocalLoss(nn.Module):
+    def __init__(self, gamma=2.0, alpha=0.25, reduction="none", pos_weight=torch.Tensor([1])):
+        super().__init__()
+        self.gamma = gamma
+        self.alpha = alpha
+        assert reduction in [ None, 'none', 'mean', 'sum']
+        self.reduction = reduction
+        self.pos_weight = pos_weight
+
+    '''
+    Args:
+        pred: tensor without sigmoid
+        target: tensor
+    '''
+    def forward(self, pred, target):
+        assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
         if pred.shape[0] == 0:
             loss = torch.ones([1, target.shape[1:]], device=pred.device) * target.shape[1:]
@@ -35,7 +68,9 @@ class FocalLoss(nn.Module):
             alpha_factor = target * self.alpha + (1 - target) * (1 - self.alpha)
             weight = alpha_factor * weight
             loss = weight * F.binary_cross_entropy_with_logits(
-                pred, target, reduction="none")
+                pred, target, 
+                pos_weight=self.pos_weight.to(pred.device),
+                reduction="none")
 
         if self.reduction == "sum":
             loss = loss.sum()
@@ -53,14 +88,45 @@ class UncertaintyLoss(nn.Module):
     def forward(self, loss, factor=1):
         return factor*torch.exp(-self.weight)*loss + F.relu(self.weight)
 
-# center loss
-class CenterLoss(nn.Module):
-    def __init__(self, loss_fn=torch.nn.SmoothL1Loss):
+# heatmap loss
+class HeatmapLoss(nn.Module):
+    def __init__(self, loss_fn=nn.BCEWithLogitsLoss()):
+        super().__init__()
+        self.loss_fn = loss_fn
+
+    def forward(self, pred, target, debug=False):
+        assert pred.shape == target.shape, \
+            f"expect {pred.shape} == {target.shape}"
+        
+        target = target.type_as(pred)
+
+        B, C, H, W = pred.shape
+        loss = 0
+        for c in range(C):
+            _loss = self.loss_fn(pred[:, c], target[:, c])
+            loss += _loss.mean()
+
+            if debug: 
+                import cv2
+                import numpy as np
+                import os
+                if not os.path.exists("debug"):
+                    os.mkdir("debug")
+                heatmap_pred = (pred[0, c].detach().cpu().numpy()*255).astype(np.uint8)
+                cv2.imwrite(f"debug/heatmap_pred_{c}.png", heatmap_pred)
+                heatmap_target = (target[0, c].cpu().numpy()*255).astype(np.uint8)
+                cv2.imwrite(f"debug/heatmap_target_{c}.png", heatmap_target)
+                
+        return loss / C
+
+# balance loss
+class BalanceLoss(nn.Module):
+    def __init__(self, loss_fn=nn.L1Loss):
         super().__init__()
         self.loss_fn = loss_fn(reduction="none")
 
     def forward(self, pred, target):
-        assert pred.shape[0] == target.shape[0], \
+        assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
         
         target = target.type_as(pred)
@@ -70,8 +136,8 @@ class CenterLoss(nn.Module):
         g_mask = target.gt(0.5).float()
         l_mask = target.lt(0.5).float()
 
-        g_loss = (loss * g_mask).sum() / torch.clamp(g_mask.sum(), 1e-8)
-        l_loss = (loss * l_mask).sum() / torch.clamp(l_mask.sum(), 1e-8)
+        g_loss = (loss * g_mask).sum() / torch.clamp(g_mask.sum(), 1e-8) + (loss * g_mask).max() * 0.1
+        l_loss = (loss * l_mask).sum() / torch.clamp(l_mask.sum(), 1e-8) + (loss * l_mask).max() * 0.1
 
         loss = (g_loss + l_loss) * 0.5
 
@@ -82,18 +148,13 @@ class DiceLoss(nn.Module):
     def __init__(self):
         super().__init__()
 
-    '''
-    Args:
-        pred: tensor in Integer
-        target: tensor in Integer
-    '''
     def forward(self, pred, target):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
-        
+
         target = target.type_as(pred)
 
-        loss = 1 - (2 * (pred * target).sum()) / torch.clamp((pred + target).sum(), 1e-8)
+        loss = 1 - 2 * (pred * target).sum() / ((pred + target).sum() + 1e-8)
 
         return loss
 
@@ -105,7 +166,7 @@ class IOULoss(nn.Module):
         self.loss_type = loss_type
 
     def forward(self, pred, target, eps=1e-7):
-        assert pred.shape[0] == target.shape[0]
+        assert pred.shape == target.shape
 
         pred = pred.view(-1, 4)
         target = target.view(-1, 4)
@@ -169,7 +230,7 @@ class OKSLoss(nn.Module):
         super().__init__()
         self.num_kpts = num_kpts
         kpts_weight = torch.tensor(kpts_weight) if kpts_weight is not None and len(kpts_weight)==num_kpts else torch.tensor([1]*num_kpts)
-        kpts_weight = torch.clip(kpts_weight, 0.5, 2.0)
+        kpts_weight = torch.clip(kpts_weight, 0.5, 4.0)
         self.sigmas = torch.tensor([1/num_kpts]*num_kpts) / kpts_weight
         self.reduction = reduction
         self.dist_loss = nn.MSELoss(reduction="none")
@@ -178,7 +239,6 @@ class OKSLoss(nn.Module):
     def forward(self, kpts_pred, kpts_conf_pred, \
                 kpts_target, kpts_conf_target, bbox_targets):
         sigmas = self.sigmas.to(device=kpts_pred.device)
-        kpts_weight = self.kpts_weight.to(device=kpts_pred.device)
 
         # OKS based loss
         if kpts_target.shape[0]==0:
@@ -187,7 +247,7 @@ class OKSLoss(nn.Module):
             dist = self.dist_loss(kpts_pred[:, 0::2], kpts_target[:, 0::2]) + self.dist_loss(kpts_pred[:, 1::2], kpts_target[:, 1::2])
             bbox_area = torch.prod(bbox_targets[:, -2:], dim=1, keepdim=True)  # scale derived from bbox gt: w*h
             kpts_loss_factor = (torch.sum(kpts_conf_target != 0) + torch.sum(kpts_conf_target == 0)) / torch.clip(torch.sum(kpts_conf_target != 0), 1e-9)
-            oks = torch.exp(-dist / torch.clip(bbox_area * (sigmas**2), 1e-9))
+            oks = torch.exp(-dist / torch.clip(2 * bbox_area * (sigmas**2), 1e-9))
             loss_kpts = kpts_loss_factor * ((1 - oks) * kpts_conf_target)
         loss_kpts = loss_kpts.mean(axis=1)
 
@@ -195,7 +255,7 @@ class OKSLoss(nn.Module):
         if kpts_conf_target.shape[0]==0:
             loss_kpts_conf = torch.ones([1, kpts_conf_target.shape[1]], device=kpts_conf_target.device) * kpts_conf_target.shape[1]
         else:
-            loss_kpts_conf = self.conf_loss(kpts_conf_pred, kpts_conf_target) * kpts_weight
+            loss_kpts_conf = self.conf_loss(kpts_conf_pred, kpts_conf_target)
         loss_kpts_conf = loss_kpts_conf.mean(axis=1)
 
         if self.reduction == "mean":

@@ -9,7 +9,7 @@ import torch
 from torch import nn
 
 from yoloxocc.exp import get_exp
-from yoloxocc.data import customDataset
+from yoloxocc.data import CustomDataset
 from yoloxocc.utils import optimize_model
 
 def make_parser():
@@ -47,7 +47,7 @@ def main():
     logger.info("args value: {}".format(args))
     exp = get_exp(args.exp_file)
 
-    valdataset = customDataset(
+    valdataset = CustomDataset(
             data_dir=exp.data_dir,
             sequence_json=exp.val_json,
             camera_list=exp.camera_list,

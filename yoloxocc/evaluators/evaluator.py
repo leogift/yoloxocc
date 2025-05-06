@@ -85,16 +85,22 @@ class Evaluator:
         Args:
             eval_results: statistics data.
         """
-        logger.info("Evaluate occ postprocess.")
+        logger.info("Evaluate postprocess.")
 
-        occ_iou_list = []
+        metric_keys = ["occ_similarity", "occ_dice"]
+        metric_list_dict = {}
+        for key in metric_keys:
+            metric_list_dict[key] = []
+
         for outputs in outputs_list:
-            if "occ_iou" in outputs:
-                occ_iou_list.append(outputs["occ_iou"])
+            for key in metric_keys:
+                if key in outputs:
+                    metric_list_dict[key].append(outputs[key])
         
-        if len(occ_iou_list) > 0:
-            occ_iou = sum(occ_iou_list) / len(occ_iou_list)
-            eval_results["eval_metrics"]["occ_iou"] = occ_iou
+        for key in metric_keys:
+            if len(metric_list_dict[key]) > 0:
+                metric_mean = sum(metric_list_dict[key]) / len(metric_list_dict[key])
+                eval_results["eval_metrics"][key] = metric_mean
 
         for k,v in eval_results["eval_metrics"].items():
             eval_results["eval_info"] += f"{k}: {v:.4f}\n"

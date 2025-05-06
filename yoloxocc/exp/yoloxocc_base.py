@@ -31,8 +31,6 @@ class Exp(BaseExp):
         self.world_xyz_bounds = [-32, 32, -2, 2, -32, 32]
         # voxel size in [x, y, z]
         self.vox_xyz_size = [128, 4, 128]
-        # precise in meter
-        self.precise_meter = 0.125 # 0.125米精度
         # dir of dataset images
         self.data_dir = None
         # name of annotation file for training
@@ -61,7 +59,7 @@ class Exp(BaseExp):
         # prob of applying mosaic aug
         self.bev_mosaic_prob = 0.5
         # prob of applying temporal aug
-        self.bev_temporal_prob = 0.8
+        self.bev_temporal_prob = 0.5
 
         # --------------  training config --------------------- #
         # epoch number used for warmup
@@ -72,7 +70,7 @@ class Exp(BaseExp):
         self.warmup_lr = 1e-6
         self.min_lr_ratio = 0.001
         # learning rate for one image. During training, lr will multiply batchsize.
-        self.basic_lr_per_img = 1e-3 / 64.0 # SGD: 0.01 / 64.0, Adam: 0.001 / 64.0
+        self.basic_lr_per_img = 4e-3 / 64.0 # SGD: 0.04 / 64.0, Adam: 0.004 / 64.0
         # name of LRScheduler
         self.scheduler = "warmcos"
         # last #epoch to close augmention like mosaic
@@ -182,9 +180,9 @@ class Exp(BaseExp):
             # add uncetainty parameters
             g[0].append(self.model.bce_uncertainty_loss.weight)
             g[0].append(self.model.focal_uncertainty_loss.weight)
-            g[0].append(self.model.center_uncertainty_loss.weight)
+            g[0].append(self.model.l1_uncertainty_loss.weight)
             g[0].append(self.model.dice_uncertainty_loss.weight)
-
+            
             if self.opt_name == "Adam":
                 optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.999))  # adjust beta1 to momentum
             elif self.opt_name == "AdamW":

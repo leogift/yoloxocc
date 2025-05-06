@@ -36,14 +36,13 @@ class OCCHead(nn.Module):
 	            bias=True),
 			get_activation(act)()
 		]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
-
-        self.occ_conv = RepBottleneck(
+        self.conv = RepBottleneck(
             int(in_channel), 
             int(in_channel), 
             act=act,
             drop_rate=drop_rate
         )
-        self.occ_pred = nn.Conv2d(
+        self.pred = nn.Conv2d(
             int(in_channel), 
             vox_y, 
             kernel_size=1, 
@@ -56,7 +55,7 @@ class OCCHead(nn.Module):
         x = inputs[self.in_feature]
 
         y = self.upsample(x)
-        y = self.occ_conv(y)
-        y = self.occ_pred(y)
+        y = self.conv(y)
+        y = self.pred(y)
 
         return y

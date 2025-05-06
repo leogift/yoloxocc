@@ -93,6 +93,7 @@ class Trainer:
     def trainning_iter(self):
         data_time = 0
         iter_start_time = time.time()
+        self.optimizer.zero_grad()
         for _ in range(self.exp.grad_accum):
             data_start_time = time.time()
 
@@ -118,7 +119,6 @@ class Trainer:
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
         self.scaler.step(self.optimizer)
         self.scaler.update()
-        self.optimizer.zero_grad()
 
         if self.use_model_ema:
             self.ema_model.update(self.model)
@@ -385,7 +385,6 @@ class Trainer:
                 )
         
         if self.rank == 0:
-            metrics = {}
             eval_info = eval_results["eval_info"]
             eval_metrics = eval_results["eval_metrics"]
 
@@ -401,7 +400,7 @@ class Trainer:
 
             logger.info("Current metric score is  {}".format(metric_mean))
             logger.info("Best metric score is  {}".format(self.best_metric_mean))
-            
+
             self.save_ckpt("last_epoch", update_best_ckpt)
             if self.save_history_ckpt:
                 self.save_ckpt(f"epoch_{self.epoch + 1}")

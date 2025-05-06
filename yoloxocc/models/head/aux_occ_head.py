@@ -19,10 +19,10 @@ class AUXOCCHead(nn.Module):
         self.in_features = in_features
 
         # 辅助输出头
-        self.aux_occ_stems = nn.ModuleList()
-        self.aux_occ_preds = nn.ModuleList()
+        self.stems = nn.ModuleList()
+        self.preds = nn.ModuleList()
         for i in range(len(in_channels)):
-            self.aux_occ_stems.append(
+            self.stems.append(
                 nn.Sequential(*[
 	                nn.Conv2d(
 	                    int(in_channels[i]), 
@@ -35,7 +35,7 @@ class AUXOCCHead(nn.Module):
 					get_activation(act)()
 				])
             )
-            self.aux_occ_preds.append(
+            self.preds.append(
                 nn.Conv2d(
                     int(in_channels[0]),
                     vox_y,
@@ -51,12 +51,12 @@ class AUXOCCHead(nn.Module):
 
         ys = []
         if self.training:
-            for aux_occ_stem, aux_occ_pred, x in zip(self.aux_occ_stems, self.aux_occ_preds, xin):
-                y = aux_occ_stem(x)
-                y = aux_occ_pred(y)
-                
+            for stem, pred, x in zip(self.stems, self.preds, xin):
+                y = stem(x)
+                y = pred(y)
+
                 ys.append(y)
 
-        # 验证时，无效
-        return ys
-        
+            # 验证时，无效
+            return ys
+            

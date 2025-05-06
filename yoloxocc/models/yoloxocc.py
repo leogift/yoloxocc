@@ -9,8 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from yoloxocc.models import BEVAugment
-from yoloxocc.models.losses import FocalLoss, CenterLoss, DiceLoss, UncertaintyLoss
-from yoloxocc.utils import basic, geom, VoxUtil, get_occ_iou
+from yoloxocc.models.losses import BCEWithLogitsLoss, FocalLoss, HeatmapLoss, BalanceLoss, DiceLoss, UncertaintyLoss
+from yoloxocc.utils import basic, geom, VoxUtil
 
 import random
 
@@ -30,13 +30,10 @@ class YOLOXOCC(nn.Module):
                 bev_backbone=None, # regnet_neck_pan
                 bev_temporal=None, # 假时序
                 bev_neck=None, # fpn
-                bev_head=None, # bev head
-                aux_bev_head_list=[], # 辅助bev head
                 occ_head=None, # occ head
                 aux_occ_head_list=[], # 辅助occ head
                 world_xyz_bounds = [-32, 32, -2, 2, -32, 32], # 世界坐标范围 单位m
                 vox_xyz_size=[128, 4, 128], # 体素坐标大小 单位格子
-                precise_meter=0.5, # 高斯图精度 单位m
                 bev_erase_prob=0.5, # 擦除概率
                 bev_flip_prob=0.5, # 翻转概率
                 bev_mixup_prob=0.5, # 混合概率
@@ -67,33 +64,24 @@ class YOLOXOCC(nn.Module):
         # bev neck: fpn
         self.bev_neck = nn.Identity() if bev_neck is None else bev_neck
 
-        # bev head
-        self.bev_head = nn.Identity() if bev_head is None else bev_head
-        # aux bev head
-        self.aux_bev_head_list = nn.ModuleList()
-        for aux_bev_head in aux_bev_head_list:
-            self.aux_bev_head_list.append(aux_bev_head)
-
         # occupancy head
         self.occ_head = nn.Identity() if occ_head is None else occ_head
         # aux occupancy head
         self.aux_occ_head_list = nn.ModuleList()
         for aux_occ_head in aux_occ_head_list:
             self.aux_occ_head_list.append(aux_occ_head)
-        
+
         # loss functions
-        # bev preds vs targets 
-        self.bce_loss = nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([2.13]), reduction="mean")
-        self.focal_loss = FocalLoss(reduction="mean")
-        # bev preds vs centermask targets
-        self.center_loss = CenterLoss()
-        # bev preds vs targets
-        self.dice_loss = DiceLoss()
+        # preds vs targets
+        self.bce_loss = HeatmapLoss(BCEWithLogitsLoss(pos_weight=torch.Tensor([2.13])))
+        self.focal_loss = HeatmapLoss(FocalLoss(pos_weight=torch.Tensor([2.13])))
+        self.l1_loss = HeatmapLoss(BalanceLoss())
+        self.dice_loss = HeatmapLoss(DiceLoss())
 
         # uncertainty loss
         self.bce_uncertainty_loss = UncertaintyLoss()
         self.focal_uncertainty_loss = UncertaintyLoss()
-        self.center_uncertainty_loss = UncertaintyLoss()
+        self.l1_uncertainty_loss = UncertaintyLoss()
         self.dice_uncertainty_loss = UncertaintyLoss()
 
         # 预制grid
@@ -105,11 +93,9 @@ class YOLOXOCC(nn.Module):
         self.vox = VoxUtil(
                 [vox_xyz_size[0], vox_xyz_size[1], vox_xyz_size[2]],
                 world_xyz_bounds=world_xyz_bounds,
-                precise_meter=precise_meter
             )
         
         self.valid_mask = self.get_valid_mask(world_xyz_bounds, vox_xyz_size)
-        
         
     # 全图给出高斯圆mask
     def get_valid_mask(self,
@@ -124,7 +110,7 @@ class YOLOXOCC(nn.Module):
         ksize = max_vox_zx*2+1
         sigma = 0.3 * ((ksize - 1) * 0.5 - 1) + 0.8
         valid_mask = cv2.getGaussianKernel(ksize, sigma)
-        valid_mask = valid_mask.dot(valid_mask.T) # 2d gaussian
+        valid_mask = (valid_mask.dot(valid_mask.T))**0.5 # 2d gaussian
         mask_z, mask_x = valid_mask.shape
         offset_vox_z = mask_z//2 + int(vox_zmin)
         offset_vox_x = mask_x//2 + int(vox_xmin)
@@ -174,7 +160,6 @@ class YOLOXOCC(nn.Module):
         }
 
         datas = self.preproc(datas)
-
         datas = self.backbone(datas)
         datas = self.neck(datas)
 
@@ -224,7 +209,7 @@ class YOLOXOCC(nn.Module):
 
         # 将lidar点云合并到voxel坐标系
         lidars_points_ref = lidars_points_ref_.reshape(B, -1, 3)
-        occ_centermask_target = self.vox.occ_centermask(lidars_points_ref) # B, Y, Z, X
+        occ_centermask_target = self.vox.occ_centermask(lidars_points_ref, radius=1.5) # B, Y, Z, X
 
         self.prepare_forward(cameras_image, cameras_extrin, cameras_intrin)
         
@@ -245,19 +230,13 @@ class YOLOXOCC(nn.Module):
         # 鸟瞰forward
         datas = self._forward_bev_(datas)
 
-        # bev
-        bev_preds = self.bev_head(datas)
-        aux_bev_preds_list = []
-        for aux_bev_head in self.aux_bev_head_list:
-            bev_preds_list = aux_bev_head(datas)
-            aux_bev_preds_list.extend(bev_preds_list)
-
         # occ
         occ_pred = self.occ_head(datas)
-        aux_occ_preds_list = []
-        for aux_occ_head in self.aux_occ_head_list:
-            occ_preds_list = aux_occ_head(datas)
-            aux_occ_preds_list.extend(occ_preds_list)
+        if self.training:
+            aux_occ_preds_list = []
+            for aux_occ_head in self.aux_occ_head_list:
+                occ_preds_list = aux_occ_head(datas)
+                aux_occ_preds_list.extend(occ_preds_list)
 
         # valid mask repeat as batch size
         if self.valid_mask.device != occ_pred.device:
@@ -266,7 +245,7 @@ class YOLOXOCC(nn.Module):
         if self.training:
             total_loss = 0
             # occ main loss
-            occ_total_loss, occ_bce_loss, occ_focal_loss, occ_center_loss, occ_dice_loss \
+            occ_total_loss, occ_bce_loss, occ_focal_loss, occ_l1_loss, occ_dice_loss \
                 = self.get_occ_losses(occ_pred, occ_centermask_target)
 
             # aux occ loss
@@ -288,17 +267,19 @@ class YOLOXOCC(nn.Module):
                 "occ_total_loss": occ_total_loss,
                 "occ_bce_loss": occ_bce_loss,
                 "occ_focal_loss": occ_focal_loss,
-                "occ_center_loss": occ_center_loss,
+                "occ_l1_loss": occ_l1_loss,
                 "occ_dice_loss": occ_dice_loss,
                 "aux_occ_loss": aux_occ_loss
             }
 
         else:
-            occ_iou = get_occ_iou(occ_pred, occ_centermask_target)
+            occ_similarity = self.get_occ_similarity(occ_pred.sigmoid(), occ_centermask_target)
+            occ_dice = self.get_occ_dice(occ_pred.sigmoid().round(), occ_centermask_target.round())
 
             # eval outputs
             outputs = {
-                "occ_iou": occ_iou,
+                "occ_similarity": occ_similarity,
+                "occ_dice": occ_dice,
             }
 
         return outputs
@@ -348,38 +329,92 @@ class YOLOXOCC(nn.Module):
     # losses
     def get_occ_losses(
         self,
-        occ_pred,
-        occ_centermask_target,
+        pred,
+        target,
         uncertainty=True
     ):
-        # occ_pred B,Y,Z,X
-        # occ_centermask_target B,Y,Z,X
-        # valid_mask B,Z,X
+        # pred B,Y,Z,X
+        # target B,Y,Z,X
 
-        assert occ_pred.shape[0] == occ_centermask_target.shape[0] \
-            and occ_pred.shape[1] == occ_centermask_target.shape[1], \
-            f"expect {occ_pred.shape[:2]} == {occ_centermask_target.shape[:2]}"
+        assert pred.shape[:2] == target.shape[:2], \
+            f"expect {pred.shape[:2]} == {target.shape[:2]}"
 
         # 对齐
-        Zp,Xp = occ_pred.shape[2:]
-        Z,X = occ_centermask_target.shape[2:]
+        Zp,Xp = pred.shape[2:]
+        Z,X = target.shape[2:]
         if Zp!=Z or Xp!=X:
-            occ_pred = F.adaptive_max_pool2d(occ_pred, (Z,X))
+            _pred = F.interpolate(pred, (Z,X))
+        else:
+            _pred = pred
+        _target = target
 
-        # occ_pred
-        bce_loss = self.bce_loss(occ_pred, occ_centermask_target.round())
-        focal_loss = self.focal_loss(occ_pred, occ_centermask_target.round())
-        center_loss = self.center_loss(occ_pred.sigmoid()*self.valid_mask, occ_centermask_target*self.valid_mask)
-        dice_loss = self.dice_loss((occ_pred.sigmoid()*self.valid_mask).round(), (occ_centermask_target*self.valid_mask).round())
+        # losses
+        bce_loss = self.bce_loss(_pred, _target.round())
+        focal_loss = self.focal_loss(_pred, _target.round())
+        l1_loss  = self.l1_loss(_pred.sigmoid()*self.valid_mask, _target*self.valid_mask)
+        dice_loss = self.dice_loss(_pred.sigmoid().round(), _target.round())
 
         if uncertainty:
             # uncertainty weight
             bce_loss = self.bce_uncertainty_loss(bce_loss)
-            focal_loss = self.focal_uncertainty_loss(focal_loss)
-            center_loss = self.center_uncertainty_loss(center_loss)
+            focal_loss = self.bce_uncertainty_loss(focal_loss)
+            l1_loss = self.l1_uncertainty_loss(l1_loss, 5)
             dice_loss = self.dice_uncertainty_loss(dice_loss)
 
-        total_loss = bce_loss + focal_loss + center_loss + dice_loss
+        total_loss = bce_loss + focal_loss \
+            + l1_loss + dice_loss
 
-        return total_loss, bce_loss, focal_loss, center_loss, dice_loss
+        return total_loss, bce_loss, focal_loss, l1_loss, dice_loss
+
+    # similarity
+    def get_occ_similarity(
+        self,
+        pred,
+        target,
+    ):
+        # pred B,Y,Z,X
+        # target B,Y,Z,X
+
+        assert pred.shape[:2] == target.shape[:2], \
+            f"expect {pred.shape[:2]} == {target.shape[:2]}"
+
+        # 对齐
+        Zp,Xp = pred.shape[2:]
+        Z,X = target.shape[2:]
+        if Zp!=Z or Xp!=X:
+            _pred = F.interpolate(pred, (Z,X), mode="bilinear", align_corners=True)
+        else:
+            _pred = pred
+        _target = target
+
+        with torch.no_grad():
+            similarity = 1 - self.l1_loss(_pred, _target, debug=True)
+
+        return similarity
+
+    # dice
+    def get_occ_dice(
+        self,
+        pred,
+        target,
+    ):
+        # pred B,Y,Z,X
+        # target B,Y,Z,X
+
+        assert pred.shape[:2] == target.shape[:2], \
+            f"expect {pred.shape[:2]} == {target.shape[:2]}"
+
+        # 对齐
+        Zp,Xp = pred.shape[2:]
+        Z,X = target.shape[2:]
+        if Zp!=Z or Xp!=X:
+            _pred = F.interpolate(pred, (Z,X))
+        else:
+            _pred = pred
+        _target = target
+
+        with torch.no_grad():
+            dice = 1 - self.dice_loss(_pred, _target)
+
+        return dice
 

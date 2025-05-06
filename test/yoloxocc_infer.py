@@ -37,9 +37,9 @@ sess = onnxruntime.InferenceSession(args.onnx)
 
 # 载入图像
 # 三个相机的图像：FRONT -> LEFT -> RIGHT
-img_front = cv2.imread(f"dataset/CAMERA_FRONT/{args.test}.jpg")
-img_left = cv2.imread(f"dataset/CAMERA_LEFT/{args.test}.jpg")
-img_right = cv2.imread(f"dataset/CAMERA_RIGHT/{args.test}.jpg")
+img_front = cv2.imread(f"dataset/CAMERA_FRONT/{args.test}.png")
+img_left = cv2.imread(f"dataset/CAMERA_LEFT/{args.test}.png")
+img_right = cv2.imread(f"dataset/CAMERA_RIGHT/{args.test}.png")
 
 H,W = 288, 512
 Z,X = 48, 64
@@ -80,21 +80,22 @@ if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
 _ = sess.run(None, inputs)
 
 last_occ_pred = None
-for i in range(1):
+start = time.time()
+loop = 3
+for i in range(loop):
     # inference
-    start = time.time()
     if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
         inputs["temporal_feature_in"] = temporal_feature
 
     outputs = sess.run(None, inputs)
-
-    print("[Inference Time]", (time.time() - start))
 
     occ_pred = outputs[0]
     if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
         temporal_feature = outputs[1]
 
     last_occ_pred = occ_pred
+
+print("[Inference Time]", (time.time() - start)/loop)
 
 _,Y,Z,X = occ_pred.shape
 

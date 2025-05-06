@@ -29,20 +29,6 @@ def get_activation(name="silu"):
     return module
 
 
-class RMSNorm(nn.Module):
-  def __init__(self, dim, eps = 1.5e-5):
-    super().__init__()
-    self.eps = eps
-    self.weight = nn.Parameter(torch.ones([1, dim, 1, 1]))
-
-  def _norm(self, x):
-    return x * torch.rsqrt(x.pow(2).mean(1, keepdim=True) + self.eps)
-
-  def forward(self, x):
-    y = self._norm(x.float()).type_as(x)
-    return self.weight * y
-
-
 class BaseConv(nn.Module):
     """A Conv2d -> Batchnorm -> silu/relu block"""
 
@@ -194,52 +180,47 @@ class CrossAttention(nn.Module):
         q_dim, 
         kv_dim,
         reduction=2,
-        heads=4,
+        heads=8,
         drop_rate=0.,
     ):
         super().__init__()
         assert q_dim % heads == 0
 
-        self.dim        = q_dim // reduction
         self.heads      = heads
-        self.head_dim   = self.dim // heads
-        self.scale      = self.head_dim ** (-0.5)
+        self.head_dim   = q_dim // self.heads
+        self.key_dim    = self.head_dim // reduction
+        self.scale      = self.key_dim ** (-0.5)
+        nh_key_dim      = self.key_dim * self.heads
 
-        self.q          = BaseConv(q_dim, self.dim, 1, stride=1, act="")
-        self.kv         = BaseConv(kv_dim, 2*self.dim, 1, stride=1, act="")
+        self.q          = BaseConv(q_dim, nh_key_dim, 1, stride=1, act="")
+        self.kv         = BaseConv(kv_dim, nh_key_dim+q_dim, 1, stride=2, act="")
         self.attn_drop  = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
 
-        self.proj       = nn.Conv2d(self.dim, q_dim, kernel_size=1, bias=True)
+        self.proj       = nn.Conv2d(q_dim, q_dim, kernel_size=1, bias=True)
 
     def forward(self, x, y):
-        B, _, H, W = x.shape
+        B, C, H, W = x.shape
 
         # B,C,H,W -> B,C,H,W
         q = self.q(x)
-        # B,C,H,W -> B,H,W,C -> B,H*W,C
-        q = q.permute(0,2,3,1).view(B, H*W, -1).contiguous()
+        # B,C,H,W -> B,Heads,Kd,N
+        q = q.view(B, self.heads, self.key_dim, -1)
 
         # B,C,H,W -> B,C,H,W
         kv = self.kv(y)
-        k,v = kv.split((self.dim, self.dim), 1)
-        # B,C,H,W -> B,H,W,C -> B,H*W,C
-        k = k.permute(0,2,3,1).view(B, H*W, -1).contiguous()
-        v = v.permute(0,2,3,1).view(B, H*W, -1).contiguous()
+        # B,C,H,W -> B,Heads,Kd+D,N
+        kv = kv.view(B, self.heads, self.key_dim+self.head_dim, -1)
+        # B,Heads,Kd+D,N -> B,Heads,Kd,N, B,Heads,D,N
+        k,v = kv.split((self.key_dim, self.head_dim), 2)
 
-        #  B,H*W,C ->  B,H*W,Head,C/Head -> B,Head,H*W,C/Head
-        q = q.view(B, -1, self.heads, self.head_dim).transpose(1, 2).contiguous()
-        k = k.view(B, -1, self.heads, self.head_dim).transpose(1, 2).contiguous()
-        v = v.view(B, -1, self.heads, self.head_dim).transpose(1, 2).contiguous()
-
-        # B,Head,N,C/Head @ B,Head,C/Head,N -> B,Head,N,N
-        attn = (q @ k.transpose(-2, -1).contiguous()) * self.scale
+        # B,Heads,N,Kd @ B,Head,Kd,N -> B,Head,N,N
+        attn = (q.transpose(-2, -1).contiguous() @ k) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
         # B,Head,N,N @ B,Head,N,C/Head -> B,Head,N,C/Head -> B,N,Head,C/Head => B, N, C
-        proj = (attn @ v).transpose(1, 2).contiguous().view(B, -1, self.dim)
+        proj = (v @ attn.transpose(-2, -1)).reshape(B, C, H, W)
         # B,N,C => B,C,N => B,C,H,W
-        proj = proj.transpose(1, 2).contiguous().view(B,self.dim,H,W)
         proj = self.proj(proj)
 
         return proj
@@ -249,11 +230,11 @@ class SelfAttention(CrossAttention):
     def __init__(self, 
         dim, 
         reduction=2,
-        heads=4, 
+        heads=8, 
         drop_rate=0.,
     ):
         super().__init__(dim, dim, reduction, heads, drop_rate)
-        
+
     def forward(self, x):
         return super().forward(x, x)
 
@@ -267,12 +248,11 @@ class Mlp(nn.Module):
     ):
         super().__init__()
         self.fc1    = BaseConv(dim, dim*expansion, 1, stride=1, act=act)
-        self.act    = get_activation(act)()
         self.fc2    = nn.Conv2d(dim*expansion, dim, kernel_size=1, bias=True)
         self.drop1   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
     def forward(self, x):
-        x = self.act(self.fc1(x))
+        x = self.fc1(x)
         if self.training:
             x = self.drop1(x)
         x = self.fc2(x)
@@ -282,7 +262,7 @@ class Mlp(nn.Module):
 class CrossTransformer(nn.Module):
     def __init__(self,
         dim,
-        heads=4,
+        heads=8,
         act="silu",
         drop_rate=0.,
     ):
@@ -315,7 +295,7 @@ class CrossTransformer(nn.Module):
 class SelfTransformer(CrossTransformer):
     def __init__(self,
         dim,
-        heads=4,
+        heads=8,
         act="silu",
         drop_rate=0.,
     ):
@@ -333,7 +313,10 @@ class SelfTransformer(CrossTransformer):
             )
         
     def forward(self, x):
-        return super().forward(x, x)
+        y = self.attn(x) + x
+        y = self.mlp(y) + y
+
+        return y
 
 
 class SEModule(nn.Module):

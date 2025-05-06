@@ -10,7 +10,7 @@ def make_parser():
     parser = argparse.ArgumentParser("YOLOOCC onnx test")
 
     parser.add_argument(
-        "--onnx", type=str, default="20250305_yoloxocc_regnet_x_200mf_w16x2x12_v64x4x48_best52.27_images_remapping_rk3588.rknn", help="onnx models"
+        "--onnx", type=str, default="20250222_yoloxocc_regnet_y_200mf_w16x2x12_v64x4x48_best54.38_images_remapping_rk3588.rknn", help="onnx models"
     )
     parser.add_argument(
         "--model", type=str, default="regnet_x_400mf", help="model name"
@@ -59,13 +59,17 @@ img_front = cv2.resize(img_front, (W, H), interpolation=cv2.INTER_NEAREST)
 img_left = cv2.resize(img_left, (W, H), interpolation=cv2.INTER_NEAREST)
 img_right = cv2.resize(img_right, (W, H), interpolation=cv2.INTER_NEAREST)
 
-# 转换为NHWC格式 ！！！RKNN多输入Bug
+# 转换为NHWC格式
 img_front = img_front[None,...].astype(np.float32)
 img_left = img_left[None,...].astype(np.float32)
 img_right = img_right[None,...].astype(np.float32)
 
 if args.images:
-    inputs = [img_front, img_left, img_right]
+    inputs = [
+        img_front,
+        img_left,
+        img_right
+    ]
 else:
     cameras_image = np.stack([img_front, img_left, img_right], axis=1)
     inputs = [cameras_image]
@@ -73,7 +77,6 @@ else:
 print("load data done")
 
 # warmup
-
 if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
     if args.model == "regnet_x_800mf":
         D = 672
@@ -86,7 +89,7 @@ _ = rknn.inference(inputs=inputs)
 
 last_occ_pred = None
 start = time.time()
-loop = 1
+loop = 3
 for i in range(loop):
     # inference
     if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
@@ -95,7 +98,6 @@ for i in range(loop):
     outputs = rknn.inference(inputs=inputs)
 
     occ_pred = outputs[0]
-    print("occ_pred", occ_pred.shape)
     if args.model in ["regnet_x_800mf", "regnet_x_1_6gf"]:
         temporal_feature = outputs[1]
 

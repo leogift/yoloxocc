@@ -64,9 +64,8 @@ if __name__ == '__main__':
     rknn = RKNN()
     # RKNN config
     print('--> Config model')
-    rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=3, \
-                quantized_algorithm="kl_divergence", \
-                model_pruning=True, \
+    rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=2, \
+                quantized_algorithm="mmse", \
                 enable_flash_attention=True, \
                 disable_rules=['fuse_mul_into_matmul']
             )
@@ -82,7 +81,8 @@ if __name__ == '__main__':
 
     # Build model
     print('--> Building model')
-    ret = rknn.build(do_quantization=args.quantization!=None, dataset=args.quantization)
+    ret = rknn.build(do_quantization=args.quantization!=None, 
+                    dataset=args.quantization)
     if ret != 0:
         print('Build model failed!')
         exit(ret)
@@ -91,7 +91,8 @@ if __name__ == '__main__':
     # Export RKNN model
     print('--> Export rknn model')
     rknn_model_path = '.'.join(args.model.split(".")[:-1])
-    rknn_model_path += "_"+args.platform+".rknn"
+    quant_type = "int8" if args.quantization is not None else "fp16"
+    rknn_model_path += "_"+args.platform+f"_{quant_type}.rknn"
     ret = rknn.export_rknn(rknn_model_path)
     if ret != 0:
         print('Export rknn model failed!')
@@ -107,12 +108,6 @@ if __name__ == '__main__':
     print('done')
 
     # 精度测量
-    origin_img = cv2.imread(args.image_path)
-    input_shape = tuple(map(int, args.resolution.split(',')))
-    resize_img = cv2.resize(origin_img, input_shape)
-    resize_img = np.ascontiguousarray(resize_img, dtype=np.float32)
-    resize_img = resize_img.transpose((2,0,1))
-
-    rknn.accuracy_analysis(inputs=[resize_img[None,:,:,:], resize_img[None,:,:,:], resize_img[None,:,:,:]], output_dir='./snapshot')
+    rknn.accuracy_analysis(inputs=[args.image_path, args.image_path, args.image_path], output_dir='./snapshot')
 
     rknn.release()

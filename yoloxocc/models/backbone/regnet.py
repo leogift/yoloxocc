@@ -20,14 +20,13 @@ class Regnet(nn.Module):
         act="silu",
         pp_repeats=0,
         transformer=False,
-        heads=16,
+        heads=8,
         drop_rate=0.,
     ):
         super().__init__()
 
         # 加载预训练模型
-        self.model = torchvision.models.__dict__[model](weights='IMAGENET1K_V1', 
-            activation=get_activation(act))
+        self.model = torchvision.models.__dict__[model](weights='IMAGENET1K_V1')
 
         # 丢弃分类头
         del self.model.avgpool

@@ -6,6 +6,7 @@ import torch
 import torch.nn as nn
 
 from yoloxocc.models.network_blocks import get_activation, C2aLayer
+from yoloxocc.utils import initialize_weights
 
 class YOLONeckFPN(nn.Module):
 
@@ -63,6 +64,11 @@ class YOLONeckFPN(nn.Module):
             act=act,
         )
         
+        initialize_weights(self.upsample5_4)
+        initialize_weights(self.upsample4_3)
+        initialize_weights(self.csp4)
+        initialize_weights(self.csp3)
+
 
     def forward(self, inputs):
         """

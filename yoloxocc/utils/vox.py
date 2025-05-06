@@ -7,7 +7,6 @@ class VoxUtil():
     def __init__(self, 
                  vox_xyz_size,
                  world_xyz_bounds,
-                 precise_meter=0.5 # 0.5米精度
                 ):
         
         self.vox_x_size, self.vox_y_size, self.vox_z_size = vox_xyz_size
@@ -15,7 +14,6 @@ class VoxUtil():
 
         self.vox_per_world = min(self.vox_x_size/(self.world_xmax-self.world_xmin), \
                                 self.vox_z_size/(self.world_zmax-self.world_zmin))
-        self.precise_meter = precise_meter
 
         # voxel坐标系和参考坐标系互转
         self.vox_T_ref = None
@@ -180,11 +178,10 @@ class VoxUtil():
 
     # ------------------------------------------------
     # 将Ref坐标系的点投影到voxel坐标系，生成occupancy mask
-    def occ_centermask(self, xyz_ref):
+    def occ_centermask(self, xyz_ref, radius=1.5):
         # xyz is B x N x 3
         # output is B x N x Z x Y x X
         B, N, _ = list(xyz_ref.shape)
-        radius = self.vox_per_world*self.precise_meter + 0.5 # 米精度
         xyz_vox = self.Ref2Vox(xyz_ref)
 
         # 超出Y的点聚集，vox用格子中心表示
@@ -213,7 +210,7 @@ class VoxUtil():
 
                     dist = grid_zx - vox_zx # 1,N,2,Z,X
                     # z**2 + x**2
-                    dist = torch.sum(dist**2, dim=2, keepdim=False)/(2*radius**2)
+                    dist = torch.sum(dist**2, dim=2, keepdim=False)/(radius**2)
                     # this is B x N x Z x X
                     mask = torch.exp(-dist)
                     # 太远的值为0
