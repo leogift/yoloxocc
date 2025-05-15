@@ -19,7 +19,7 @@ class Exp(BaseExp):
         self.data_dir = "custom"
 
         self.train_json = "train.json"
-        self.val_json = "val.json"
+        self.val_json = "val_tailer.json"
 
         self.image_size = (288, 512)  # (height, width)
         self.camera_list = ['front', 'left', 'right']
@@ -35,8 +35,8 @@ class Exp(BaseExp):
         self.model_name = "regnet_x_800mf"
 
         self.warmup_epochs = 10
-        self.no_aug_epochs = 20
-        self.data_num_workers = 4
+        self.no_aug_epochs = 10
+        self.data_num_workers = 8
         self.eval_epoch_interval = 5
 
 
@@ -47,7 +47,7 @@ class Exp(BaseExp):
             BaseNorm, Regnet, YOLONeckFPN, \
             PerspectiveTrans, \
             RegnetNeckPAN, Temporal, OCCHead, AUXOCCHead, \
-            C2kLayer
+            C2aLayer, C2kLayer
             
             preproc = BaseNorm(trainable=True)
 
@@ -66,7 +66,7 @@ class Exp(BaseExp):
                     in_channels=self.channels,
                     out_features=("fpn3", "fpn4", "fpn5"),
                     act=self.act, 
-                    layer_type=C2kLayer,
+                    layer_type=C2aLayer,
                     n=1
                 )
             transform = PerspectiveTrans(
@@ -75,7 +75,6 @@ class Exp(BaseExp):
                     layer_type=C2kLayer,
                     vox_xyz_size=self.vox_xyz_size,
                     world_xyz_bounds=self.world_xyz_bounds,
-                    n=1
                 )
             
             pp_repeats = 0 if min(self.vox_xyz_size[0], self.vox_xyz_size[2])//8 <= 4 \
@@ -88,7 +87,6 @@ class Exp(BaseExp):
                     transformer=True,
                     drop_rate=0.1,
                     layer_type=C2kLayer,
-                    n=1
                 )
             self.bev_channels = bev_backbone.output_channels[-3:]
             bev_temporal = Temporal(
@@ -103,7 +101,7 @@ class Exp(BaseExp):
                     in_channels=self.bev_channels,
                     out_features=("bev_fpn3", "bev_fpn4", "bev_fpn5"),
                     act=self.act, 
-                    layer_type=C2kLayer,
+                    layer_type=C2aLayer,
                     n=1
                 )
             occ_head = OCCHead(
@@ -147,6 +145,10 @@ class Exp(BaseExp):
         ckpt = torch.load(_CKPT_FULL_PATH, map_location="cpu")
         if "model" in ckpt:
             ckpt = ckpt["model"]
+
+        for k in list(ckpt.keys()):
+            if "loss" in k or "Loss" in k:
+                del ckpt[k]
 
         incompatible = self.model.load_state_dict(ckpt, strict=False)
         logger.info("missing_keys:")

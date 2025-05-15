@@ -42,7 +42,7 @@ class Trainer:
         self.max_epoch = exp.max_epoch
         self.warmup_epochs = exp.warmup_epochs
         self.amp_training = args.fp16
-        self.scaler = torch.cuda.amp.GradScaler(enabled=args.fp16)
+        self.scaler = torch.amp.GradScaler("cuda", enabled=args.fp16)
         self.is_distributed = get_world_size() > 1
         self.rank = get_rank()
         self.device = "cuda:{}".format(self.rank)
@@ -98,7 +98,6 @@ class Trainer:
             data_start_time = time.time()
 
             _targets = self.prefetcher.next()
-            
             targets = []
             for target in _targets:
                 target = target.type(self.data_type)
@@ -108,15 +107,12 @@ class Trainer:
             data_end_time = time.time()
             data_time += (data_end_time - data_start_time)
 
-            with torch.cuda.amp.autocast(enabled=self.amp_training):
+            with torch.amp.autocast("cuda", enabled=self.amp_training):
                 outputs = self.model(*targets)
-
-            loss = outputs["total_loss"]
-
+                loss = outputs["total_loss"]
+            
             self.scaler.scale(loss).backward()
 
-        self.scaler.unscale_(self.optimizer)
-        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=10.0)
         self.scaler.step(self.optimizer)
         self.scaler.update()
 

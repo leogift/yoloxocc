@@ -23,7 +23,7 @@ class Evaluator:
 
     def evaluate(
         self, 
-        model,
+        model
     ):
         if not is_main_process():
             return None

@@ -50,7 +50,7 @@ def launch(
     if num_gpus > 1:
         port = _find_free_port()
         dist_url = f"tcp://localhost:{port}"
-        start_method = "fork"
+        start_method = "spawn"
 
         mp.start_processes(
             _distributed_worker,

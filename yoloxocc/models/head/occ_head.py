@@ -4,7 +4,7 @@
 
 import torch.nn as nn
 
-from yoloxocc.models.network_blocks import get_activation, RepBottleneck
+from yoloxocc.models.network_blocks import get_activation, BaseConv
 from yoloxocc.utils import initialize_weights
 
 class OCCHead(nn.Module):
@@ -36,17 +36,27 @@ class OCCHead(nn.Module):
 	            bias=True),
 			get_activation(act)()
 		]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
-        self.conv = RepBottleneck(
-            int(in_channel), 
-            int(in_channel), 
-            act=act,
-            drop_rate=drop_rate
-        )
+        self.conv = nn.Sequential(*[
+            BaseConv(
+                int(in_channel), 
+                int(in_channel), 
+                3,
+                act=act,
+            ),
+            BaseConv(
+                int(in_channel), 
+                int(in_channel), 
+                3,
+                act=act,
+            ),
+        ])
         self.pred = nn.Conv2d(
             int(in_channel), 
             vox_y, 
             kernel_size=1, 
             bias=True)
+
+        self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
         initialize_weights(self)
  
@@ -56,6 +66,8 @@ class OCCHead(nn.Module):
 
         y = self.upsample(x)
         y = self.conv(y)
+        if self.training:
+            y = self.drop(y)
         y = self.pred(y)
 
         return y

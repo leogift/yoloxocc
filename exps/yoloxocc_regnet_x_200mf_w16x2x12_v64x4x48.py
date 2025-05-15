@@ -9,7 +9,7 @@ from loguru import logger
 
 from yoloxocc.utils.checkpoint import get_missing_parameters_message, get_unexpected_parameters_message
 
-_CKPT_FULL_PATH = "pretrain/yoloxocc_regnet_x_1_6gf_v64x8x48.pth"
+_CKPT_FULL_PATH = "pretrain/yoloxocc_regnet_x_200mf_v64x4x48.pth"
 
 class Exp(BaseExp):
     def __init__(self):
@@ -25,14 +25,14 @@ class Exp(BaseExp):
         self.camera_list = ['front', 'left', 'right']
         self.lidar_list = ['top']
         self.category_list = ['car', 'pedestrian']
-        self.world_xyz_bounds = [-16, 16, -0.5, 1.5, -8, 16] # [xmin, xmax+1unit, ymin, ymax+1unit, zmin, zmax+1unit]
+        self.world_xyz_bounds = [-8, 8, -0.5, 1.5, -4, 8] # [xmin, xmax+1unit, ymin, ymax+1unit, zmin, zmax+1unit]
         # voxel size in [x, y, z]
-        self.vox_xyz_size = [64, 8, 48]
+        self.vox_xyz_size = [64, 4, 48]
 
         self.act = "relu"
-        self.max_epoch = 120
+        self.max_epoch = 30
 
-        self.model_name = "regnet_x_1_6gf"
+        self.model_name = "regnet_x_400mf"
 
         self.warmup_epochs = 10
         self.no_aug_epochs = 10
@@ -55,9 +55,9 @@ class Exp(BaseExp):
                 else (min(self.image_size[0], self.image_size[1])//32 - 4)//6 + 1
             backbone = Regnet(
                     self.model_name,
+                    model_reduce=2,
                     act=self.act, 
                     pp_repeats=pp_repeats,
-                    transformer=True,
                     drop_rate=0.1,
                 )
             self.channels = backbone.output_channels[-3:]
@@ -67,11 +67,14 @@ class Exp(BaseExp):
                     out_features=("fpn3", "fpn4", "fpn5"),
                     act=self.act, 
                     layer_type=C2aLayer,
+                    simple_reshape=True,
+                    n=1
                 )
             transform = PerspectiveTrans(
                     in_channels=self.channels,
                     act=self.act, 
                     layer_type=C2kLayer,
+                    n=2
                     vox_xyz_size=self.vox_xyz_size,
                     world_xyz_bounds=self.world_xyz_bounds,
                 )
@@ -80,27 +83,25 @@ class Exp(BaseExp):
                 else (min(self.vox_xyz_size[0], self.vox_xyz_size[2])//8 - 4)//6 + 1
             bev_backbone = RegnetNeckPAN(
                     self.model_name,
+                    model_reduce=8,
                     in_channels=self.channels,
                     act=self.act,
                     pp_repeats=pp_repeats,
                     transformer=True,
                     drop_rate=0.1,
                     layer_type=C2kLayer,
+                    n=2
                 )
             self.bev_channels = bev_backbone.output_channels[-3:]
-            bev_temporal = Temporal(
-                    in_feature="bev_backbone5",
-                    in_channel=self.bev_channels[-1],
-                    act=self.act,
-                    drop_rate=0.1,
-                    temporal_prob=self.bev_temporal_prob,
-                )
+            bev_temporal = None
             bev_neck = YOLONeckFPN(
                     in_features=("bev_backbone3", "bev_backbone4", "bev_backbone5"),
                     in_channels=self.bev_channels,
                     out_features=("bev_fpn3", "bev_fpn4", "bev_fpn5"),
                     act=self.act, 
                     layer_type=C2aLayer,
+                    simple_reshape=True,
+                    n=1
                 )
             occ_head = OCCHead(
                     in_feature="bev_fpn3",
@@ -108,6 +109,7 @@ class Exp(BaseExp):
                     vox_y=self.vox_xyz_size[1],
                     act=self.act, 
                     drop_rate=0.1,
+                    simple_reshape=True
                 )
             aux_occ_head_list = [
                     AUXOCCHead(
@@ -145,7 +147,8 @@ class Exp(BaseExp):
             ckpt = ckpt["model"]
 
         for k in list(ckpt.keys()):
-            if "loss" in k or "Loss" in k:
+            if "pred" in k \
+                or "loss" in k or "Loss" in k:
                 del ckpt[k]
 
         incompatible = self.model.load_state_dict(ckpt, strict=False)

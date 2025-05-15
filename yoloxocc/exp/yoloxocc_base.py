@@ -177,12 +177,7 @@ class Exp(BaseExp):
                         g[1].append(p)
                     else:
                         g[0].append(p)  # weight (with decay)
-            # add uncetainty parameters
-            g[0].append(self.model.bce_uncertainty_loss.weight)
-            g[0].append(self.model.focal_uncertainty_loss.weight)
-            g[0].append(self.model.l1_uncertainty_loss.weight)
-            g[0].append(self.model.dice_uncertainty_loss.weight)
-            
+
             if self.opt_name == "Adam":
                 optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.999))  # adjust beta1 to momentum
             elif self.opt_name == "AdamW":

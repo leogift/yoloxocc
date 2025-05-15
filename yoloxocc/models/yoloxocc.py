@@ -9,7 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from yoloxocc.models import BEVAugment
-from yoloxocc.models.losses import BCEWithLogitsLoss, FocalLoss, HeatmapLoss, BalanceLoss, DiceLoss, UncertaintyLoss
+from yoloxocc.models.losses import FocalLoss, HeatmapLoss, BalanceLoss, DiceLoss, UncertaintyLoss
 from yoloxocc.utils import basic, geom, VoxUtil
 
 import random
@@ -72,16 +72,15 @@ class YOLOXOCC(nn.Module):
             self.aux_occ_head_list.append(aux_occ_head)
 
         # loss functions
-        # preds vs targets
-        self.bce_loss = HeatmapLoss(BCEWithLogitsLoss(pos_weight=torch.Tensor([2.13])))
-        self.focal_loss = HeatmapLoss(FocalLoss(pos_weight=torch.Tensor([2.13])))
-        self.l1_loss = HeatmapLoss(BalanceLoss())
+        self.bce_loss = HeatmapLoss(nn.BCEWithLogitsLoss(pos_weight=torch.Tensor([2.13]), reduction="mean"))
+        self.focal_loss = HeatmapLoss(FocalLoss(reduction="mean"))
+        self.diff_loss = HeatmapLoss(BalanceLoss())
         self.dice_loss = HeatmapLoss(DiceLoss())
 
         # uncertainty loss
         self.bce_uncertainty_loss = UncertaintyLoss()
         self.focal_uncertainty_loss = UncertaintyLoss()
-        self.l1_uncertainty_loss = UncertaintyLoss()
+        self.diff_uncertainty_loss = UncertaintyLoss()
         self.dice_uncertainty_loss = UncertaintyLoss()
 
         # 预制grid
@@ -209,7 +208,8 @@ class YOLOXOCC(nn.Module):
 
         # 将lidar点云合并到voxel坐标系
         lidars_points_ref = lidars_points_ref_.reshape(B, -1, 3)
-        occ_centermask_target = self.vox.occ_centermask(lidars_points_ref, radius=1.5) # B, Y, Z, X
+        radius = basic.gaussian_radius((self.vox.vox_z_size,self.vox.vox_x_size), stride=8)
+        occ_centermask_target = self.vox.occ_centermask(lidars_points_ref, radius=radius) # B, Y, Z, X
 
         self.prepare_forward(cameras_image, cameras_extrin, cameras_intrin)
         
@@ -235,8 +235,8 @@ class YOLOXOCC(nn.Module):
         if self.training:
             aux_occ_preds_list = []
             for aux_occ_head in self.aux_occ_head_list:
-                occ_preds_list = aux_occ_head(datas)
-                aux_occ_preds_list.extend(occ_preds_list)
+                occ_preds = aux_occ_head(datas)
+                aux_occ_preds_list.extend(occ_preds)
 
         # valid mask repeat as batch size
         if self.valid_mask.device != occ_pred.device:
@@ -245,7 +245,7 @@ class YOLOXOCC(nn.Module):
         if self.training:
             total_loss = 0
             # occ main loss
-            occ_total_loss, occ_bce_loss, occ_focal_loss, occ_l1_loss, occ_dice_loss \
+            occ_total_loss, occ_bce_loss, occ_focal_loss, occ_diff_loss, occ_dice_loss \
                 = self.get_occ_losses(occ_pred, occ_centermask_target)
 
             # aux occ loss
@@ -267,14 +267,14 @@ class YOLOXOCC(nn.Module):
                 "occ_total_loss": occ_total_loss,
                 "occ_bce_loss": occ_bce_loss,
                 "occ_focal_loss": occ_focal_loss,
-                "occ_l1_loss": occ_l1_loss,
+                "occ_diff_loss": occ_diff_loss,
                 "occ_dice_loss": occ_dice_loss,
                 "aux_occ_loss": aux_occ_loss
             }
 
         else:
-            occ_similarity = self.get_occ_similarity(occ_pred.sigmoid(), occ_centermask_target)
-            occ_dice = self.get_occ_dice(occ_pred.sigmoid().round(), occ_centermask_target.round())
+            occ_similarity = self.get_occ_similarity(occ_pred, occ_centermask_target)
+            occ_dice = self.get_occ_dice(occ_pred, occ_centermask_target)
 
             # eval outputs
             outputs = {
@@ -292,7 +292,6 @@ class YOLOXOCC(nn.Module):
         if mode:
             self.forward = self.forward_trainval
         return self
-
 
     # ------------------------------------------------
     # BEGIN: export forward
@@ -335,7 +334,6 @@ class YOLOXOCC(nn.Module):
     ):
         # pred B,Y,Z,X
         # target B,Y,Z,X
-
         assert pred.shape[:2] == target.shape[:2], \
             f"expect {pred.shape[:2]} == {target.shape[:2]}"
 
@@ -351,20 +349,20 @@ class YOLOXOCC(nn.Module):
         # losses
         bce_loss = self.bce_loss(_pred, _target.round())
         focal_loss = self.focal_loss(_pred, _target.round())
-        l1_loss  = self.l1_loss(_pred.sigmoid()*self.valid_mask, _target*self.valid_mask)
+        diff_loss  = self.diff_loss(_pred.sigmoid()*self.valid_mask, _target*self.valid_mask)
         dice_loss = self.dice_loss(_pred.sigmoid().round(), _target.round())
 
         if uncertainty:
             # uncertainty weight
             bce_loss = self.bce_uncertainty_loss(bce_loss)
             focal_loss = self.bce_uncertainty_loss(focal_loss)
-            l1_loss = self.l1_uncertainty_loss(l1_loss, 5)
-            dice_loss = self.dice_uncertainty_loss(dice_loss)
+            diff_loss = self.diff_uncertainty_loss(diff_loss, 5)
+            dice_loss = self.dice_uncertainty_loss(dice_loss, 2)
 
         total_loss = bce_loss + focal_loss \
-            + l1_loss + dice_loss
+            + diff_loss + dice_loss
 
-        return total_loss, bce_loss, focal_loss, l1_loss, dice_loss
+        return total_loss, bce_loss, focal_loss, diff_loss, dice_loss
 
     # similarity
     def get_occ_similarity(
@@ -374,7 +372,6 @@ class YOLOXOCC(nn.Module):
     ):
         # pred B,Y,Z,X
         # target B,Y,Z,X
-
         assert pred.shape[:2] == target.shape[:2], \
             f"expect {pred.shape[:2]} == {target.shape[:2]}"
 
@@ -388,7 +385,7 @@ class YOLOXOCC(nn.Module):
         _target = target
 
         with torch.no_grad():
-            similarity = 1 - self.l1_loss(_pred, _target, debug=True)
+            similarity = 1 - self.diff_loss(_pred.sigmoid(), _target, debug=True)
 
         return similarity
 
@@ -400,7 +397,6 @@ class YOLOXOCC(nn.Module):
     ):
         # pred B,Y,Z,X
         # target B,Y,Z,X
-
         assert pred.shape[:2] == target.shape[:2], \
             f"expect {pred.shape[:2]} == {target.shape[:2]}"
 
@@ -408,13 +404,12 @@ class YOLOXOCC(nn.Module):
         Zp,Xp = pred.shape[2:]
         Z,X = target.shape[2:]
         if Zp!=Z or Xp!=X:
-            _pred = F.interpolate(pred, (Z,X))
+            _pred = F.interpolate(pred, (Z,X), mode="bilinear", align_corners=True)
         else:
             _pred = pred
         _target = target
 
         with torch.no_grad():
-            dice = 1 - self.dice_loss(_pred, _target)
+            dice = 1 - self.dice_loss(_pred.sigmoid().round(), _target.round())
 
         return dice
-

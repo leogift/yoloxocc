@@ -196,15 +196,13 @@ class VoxUtil():
         grid_zx = torch.stack([grid_z, grid_x], dim=1).reshape(1, 1, 2, self.vox_z_size, self.vox_x_size)
         # this is 1 x 1 x 2 x Z x X
 
-        occ_centermask = None
+        batch_centermask = []
         for b in range(B):
-            centermask = None
+            _centermask = []
             for y in range(self.vox_y_size):
                 # 取高度为y的平面
                 xyz_vox_y = xyz_vox[b, xyz_vox[b,:,1].long()==y]
-                if xyz_vox_y.shape[0] == 0:
-                    mask = torch.zeros(1, 1, self.vox_z_size, self.vox_x_size, device=xyz_vox.device)
-                else:
+                if xyz_vox_y.shape[0]>0:
                     vox_zx = torch.stack([xyz_vox_y[:,2], xyz_vox_y[:,0]], dim=1)
                     vox_zx = vox_zx.reshape(1, -1, 2, 1, 1) # 1,N,2,1,1
 
@@ -212,19 +210,20 @@ class VoxUtil():
                     # z**2 + x**2
                     dist = torch.sum(dist**2, dim=2, keepdim=False)/(radius**2)
                     # this is B x N x Z x X
-                    mask = torch.exp(-dist)
+                    mask = torch.sqrt(torch.exp(-dist))
                     # 太远的值为0
-                    mask[mask < 0.001] = 0.0 # 1,N/Y,Z,X
+                    mask[mask < 0.01] = 0.0 # 1,N/Y,Z,X
                     mask = torch.max(mask, dim=1, keepdim=True)[0]
 
-                if centermask is None:
-                    centermask = mask
                 else:
-                    centermask = torch.cat([centermask, mask], dim=1)
+                    mask = torch.zeros(1, 1, self.vox_z_size, self.vox_x_size)
+                
+                mask = mask.to(xyz_ref.device)
+                _centermask.append(mask)
 
-            if occ_centermask is None:
-                occ_centermask = centermask
-            else:
-                occ_centermask = torch.cat([occ_centermask, centermask], dim=0)
+            _centermask = torch.cat(_centermask, dim=1)
+            batch_centermask.append(_centermask)
 
-        return occ_centermask # B,Y,Z,X
+        batch_centermask = torch.cat(batch_centermask, dim=0)
+
+        return batch_centermask # B,Y,Z,X

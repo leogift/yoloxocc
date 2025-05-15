@@ -4,8 +4,6 @@
 
 import argparse
 
-import cv2
-import numpy as np
 from rknn.api import RKNN
 
 def make_parser():
@@ -16,13 +14,6 @@ def make_parser():
         type=str,
         default="yoloxocc_regnet_x_800mf.onnx",
         help="Input onnx model.",
-    )
-    parser.add_argument(
-        "-c",
-        "--cameras",
-        type=int,
-        default=3,
-        help="Number of cameras.",
     )
     parser.add_argument(
         "-i",
@@ -65,7 +56,7 @@ if __name__ == '__main__':
     # RKNN config
     print('--> Config model')
     rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=2, \
-                quantized_algorithm="mmse", \
+                quantized_algorithm="kl_divergence", \
                 enable_flash_attention=True, \
                 disable_rules=['fuse_mul_into_matmul']
             )
