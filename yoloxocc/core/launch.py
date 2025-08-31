@@ -98,3 +98,4 @@ def _distributed_worker(
     torch.cuda.set_device(rank)
 
     main_func(*args)
+

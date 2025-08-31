@@ -15,5 +15,4 @@ from .metric import *
 from .model_utils import *
 from .setup_env import *
 from .vox import VoxUtil
-from .weights import *
 from .allreduce_norm import *

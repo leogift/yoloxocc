@@ -8,8 +8,11 @@ import numpy as np
 from yoloxocc.utils import geom
 
 # static resize
-def static_resize(img, image_size):
-    padded_img = np.ones((image_size[0], image_size[1], 3), dtype=np.uint8) * 114
+def static_resize(img, image_size, gray=False, bgcolor=114):
+    if gray:
+        padded_img = np.ones((image_size[0], image_size[1]), dtype=np.uint8) * bgcolor
+    else:
+        padded_img = np.ones((image_size[0], image_size[1], 3), dtype=np.uint8) * bgcolor
     ratio = min(image_size[0] / img.shape[0], image_size[1] / img.shape[1])
     # 随机缩放模式
     interpolation_types = [

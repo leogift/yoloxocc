@@ -185,9 +185,8 @@ class VoxUtil():
         xyz_vox = self.Ref2Vox(xyz_ref)
 
         # 超出Y的点聚集，vox用格子中心表示
-        xyz_vox[:,:,1] = torch.clamp(xyz_vox[:,:,1], 0, self.vox_y_size-1)
         xyz_vox = torch.round(xyz_vox)
-        
+
         # BEV方向，X为W方向，Z为H方向
         grid_z, grid_x = basic.meshgrid2d(1, self.vox_z_size, self.vox_x_size)
         grid_z = grid_z.to(xyz_vox.device)

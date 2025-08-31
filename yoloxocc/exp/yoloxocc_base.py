@@ -37,9 +37,10 @@ class Exp(BaseExp):
         self.train_json = "train.json"
         # name of annotation file for evaluation
         self.val_json = "val.json"
+        # wether to use the gaussian mask
+        self.use_gaussian_mask = False
 
         # --------------- Front View Transform ----------------- #
-        self.no_aug = False
         # prob of applying hsv aug
         self.hsv_prob = 0.5
         # prob of applying blur aug
@@ -54,12 +55,8 @@ class Exp(BaseExp):
         self.bev_erase_prob = 0.5
         # prob of applying flip aug
         self.bev_flip_prob = 0.5
-        # prob of applying mixup aug
-        self.bev_mixup_prob = 0.2
         # prob of applying mosaic aug
         self.bev_mosaic_prob = 0.5
-        # prob of applying temporal aug
-        self.bev_temporal_prob = 0.5
 
         # --------------  training config --------------------- #
         # epoch number used for warmup
@@ -145,7 +142,7 @@ class Exp(BaseExp):
             sampler=sampler,
             batch_size=batch_size,
             drop_last=False,
-            aug=not self.no_aug,
+            aug=True,
             image_size=self.image_size
         )
 

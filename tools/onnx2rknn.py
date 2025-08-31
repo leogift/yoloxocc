@@ -23,13 +23,6 @@ def make_parser():
         help="Path to your test input image.",
     )
     parser.add_argument(
-        "-r",
-        "--resolution",
-        type=str,
-        default="512,288",
-        help="Specify an input resolution(WH) for inference.",
-    )
-    parser.add_argument(
         "-p",
         "--platform",
         type=str,
@@ -55,9 +48,9 @@ if __name__ == '__main__':
     rknn = RKNN()
     # RKNN config
     print('--> Config model')
-    rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=2, \
-                quantized_algorithm="kl_divergence", \
-                enable_flash_attention=True, \
+    rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=3,
+                quantized_algorithm="kl_divergence",
+                enable_flash_attention=True,
                 disable_rules=['fuse_mul_into_matmul']
             )
     print('done')

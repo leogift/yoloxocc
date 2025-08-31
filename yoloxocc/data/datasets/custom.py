@@ -131,7 +131,6 @@ class CustomDataset(DatasetBase):
 
         self.datasets = self._preload_all()
 
-
     def __len__(self):
         return len(self.datasets)
 
@@ -141,6 +140,7 @@ class CustomDataset(DatasetBase):
         with open(os.path.join(self.data_dir, sequence_json), "r") as f:
             sequence_dict = json.load(f)
             f.close()
+
         # 读取单个标注文件
         annotations_dict = {}
         for sequence in sequence_dict.keys():
@@ -150,6 +150,7 @@ class CustomDataset(DatasetBase):
                     token = single_dict["token"]
                     annotations_dict[token] = single_dict
                     f.close()
+
         return annotations_dict
 
     # 除图片，全载入内存

@@ -7,8 +7,8 @@ from torch import nn
 class BaseNorm(nn.Module):
     def __init__(
         self,
-        mean = [114,114,114],
-        std = [58,58,58],
+        mean = [114.495,114.495,114.495],
+        std = [57.63,57.63,57.63],
         trainable = False
     ):
         super().__init__()
@@ -24,6 +24,7 @@ class BaseNorm(nn.Module):
             self.normalize = nn.Conv2d(N, N, kernel_size=1, stride=1, padding=0)
             self.normalize.weight.data = torch.diag(self.inversed_std).view(N, N, 1, 1).requires_grad_(True)
             self.normalize.bias.data = (-self.mean*self.inversed_std).requires_grad_(True)
+            self.normalize.requires_grad_(True)
 
     def forward(self, inputs):
         x = inputs["cameras_image_"]

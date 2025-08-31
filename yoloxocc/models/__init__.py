@@ -8,7 +8,6 @@ from .preproc import *
 from .backbone import *
 from .neck import *
 from .transform import *
-from .temporal import *
 from .head import *
 
 from .yoloxocc import YOLOXOCC

@@ -18,7 +18,7 @@ def make_parser():
         "-o", "--output-name", type=str, default="yoloxocc.onnx", help="output name of models"
     )
     parser.add_argument(
-        "-s", "--opset", default=16, type=int, help="onnx opset version"
+        "-s", "--opset", default=12, type=int, help="onnx opset version"
     )
     parser.add_argument("-b", "--batch-size", type=int, default=1, help="batch size")
     parser.add_argument(
@@ -29,7 +29,7 @@ def make_parser():
         help="experiment description file",
     )
     parser.add_argument("-c", "--ckpt", default=None, type=str, help="ckpt path")
-    parser.add_argument("-p", "--perspective-mode", default="gridsample", type=str, help="'gridsample' or 'remapping'")
+    parser.add_argument("-p", "--perspective-mode", default="remapping", type=str, help="'gridsample' or 'remapping'")
 
     parser.add_argument(
         "--images",
@@ -69,7 +69,7 @@ def main():
         cameras_extrin = cameras_extrin.repeat(args.batch_size, 1, 1)
         cameras_intrin = cameras_intrin.repeat(args.batch_size, 1, 1)
 
-    logger.info("loading dataset done.")
+    logger.info("load dataset done.")
 
     model = exp.get_model()
     model = model.cpu()
@@ -97,14 +97,9 @@ def main():
 
     model.eval()
 
-    logger.info("loading checkpoint done.")
+    logger.info("load checkpoint done.")
 
     output_names = ["occ_pred"]
-    if(type(model.bev_temporal) is not nn.Identity): # 说明没有时序部分
-        temporal_feature = torch.randn(args.batch_size, model.bev_backbone.output_channels[-1], Z//8, X//8).type(torch.float32).cpu()
-        input_args.append(temporal_feature)
-        input_names.append("temporal_feature_in")
-        output_names.append("temporal_feature_out")
 
     output_onnx_name = args.output_name.split(".onnx")[0]
     if args.images:

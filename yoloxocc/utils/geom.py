@@ -111,3 +111,51 @@ def translate_intrinsics_single(K, sx, sy):
     y0 = y0 - sy
     K = merge_intrinsics_single(fx, fy, x0, y0)
     return K
+
+
+def pixels2pointcloud(u,v,d,K):
+    # u and v are locations in pixel coordinates, d is a depth in meters
+    # K is camera intrinsics
+    # returns xyz, sized B x N x 3
+
+    fx, fy, x0, y0 = split_intrinsics(K)
+    B = x.shape[0]
+
+    fx = torch.reshape(fx, [B,1])
+    fy = torch.reshape(fy, [B,1])
+    x0 = torch.reshape(x0, [B,1])
+    y0 = torch.reshape(y0, [B,1])
+
+    u = torch.reshape(u, [B,-1])
+    v = torch.reshape(v, [B,-1])
+    d = torch.reshape(d, [B,-1])
+
+    # unproject
+    x = (d/fx)*(u-x0)
+    y = (d/fy)*(v-y0)
+
+    xyz = torch.stack([x,y,d], dim=2)
+    # B x N x 3
+    return xyz
+
+def pointcloud2pixels(xyz, K):
+    # xyz is shaped B x N x 3
+    # returns x, y, shaped B x N x 1
+    
+    fx, fy, x0, y0 = split_intrinsics(K)
+    x, y, z = torch.unbind(xyz, dim=-1)
+    B = list(x.shape)[0]
+
+    fx = torch.reshape(fx, [B,1])
+    fy = torch.reshape(fy, [B,1])
+    x0 = torch.reshape(x0, [B,1])
+    y0 = torch.reshape(y0, [B,1])
+    x = torch.reshape(x, [B,-1])
+    y = torch.reshape(y, [B,-1])
+    z = torch.reshape(z, [B,-1])
+
+    EPS = 1e-4
+    d = torch.clamp(d, min=EPS)
+    u = (x*fx)/d + x0
+    v = (y*fy)/d + y0
+    return u, v
