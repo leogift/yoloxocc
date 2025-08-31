@@ -24,3 +24,5 @@ timm
 termcolor
 
 open3d
+
+fvcore

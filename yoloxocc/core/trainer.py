@@ -214,53 +214,55 @@ class Trainer:
         else:
             compat_model = self.model
 
-        if self.epoch + 1 > self.max_epoch - self.exp.no_aug_epochs or self.exp.no_aug:
+        if self.epoch + 1 <= self.warmup_epochs//2:
+            logger.info("--->Freeze all!")
+            freeze_module(compat_model.backbone)
+            freeze_module(compat_model.neck)
+            freeze_module(compat_model.transform)
+            freeze_module(compat_model.bev_neck)
+            
+            logger.info("--->No aug now!")
+            if compat_model.bev_augment is not None:
+                compat_model.bev_augment.disable_aug()
+            self.train_loader.batch_sampler.disable_aug()
+
+        elif self.epoch + 1 > self.max_epoch - self.exp.no_aug_epochs:
             if self.exp.only_train_head:
                 logger.info("--->Freeze all!")
                 freeze_module(compat_model.backbone)
                 freeze_module(compat_model.neck)
-                freeze_module(compat_model.bev_backbone)
+                freeze_module(compat_model.transform)
                 freeze_module(compat_model.bev_neck)
             else:
                 logger.info("--->Unfreeze all!")
                 unfreeze_module(compat_model.backbone)
                 unfreeze_module(compat_model.neck)
-                unfreeze_module(compat_model.bev_backbone)
+                unfreeze_module(compat_model.transform)
                 unfreeze_module(compat_model.bev_neck)
 
-
             logger.info("--->No aug now!")
-            compat_model.bev_augment.disable_aug()
+            if compat_model.bev_augment is not None:
+                compat_model.bev_augment.disable_aug()
             self.train_loader.batch_sampler.disable_aug()
             self.exp.eval_epoch_interval = 1
-
-        elif self.epoch + 1 <= self.warmup_epochs//2:
-            logger.info("--->Freeze all!")
-            freeze_module(compat_model.backbone)
-            freeze_module(compat_model.neck)
-            freeze_module(compat_model.bev_backbone)
-            freeze_module(compat_model.bev_neck)
-            
-            logger.info("--->No aug now!")
-            compat_model.bev_augment.disable_aug()
-            self.train_loader.batch_sampler.disable_aug()
 
         else:
             if self.exp.only_train_head:
                 logger.info("--->Freeze all!")
                 freeze_module(compat_model.backbone)
                 freeze_module(compat_model.neck)
-                freeze_module(compat_model.bev_backbone)
+                freeze_module(compat_model.transform)
                 freeze_module(compat_model.bev_neck)
             else:
                 logger.info("--->Unfreeze all!")
                 unfreeze_module(compat_model.backbone)
                 unfreeze_module(compat_model.neck)
-                unfreeze_module(compat_model.bev_backbone)
+                unfreeze_module(compat_model.transform)
                 unfreeze_module(compat_model.bev_neck)
             
             logger.info("--->Use aug now!")
-            compat_model.bev_augment.enable_aug()
+            if compat_model.bev_augment is not None:
+                compat_model.bev_augment.enable_aug()
             self.train_loader.batch_sampler.enable_aug()
 
     def after_epoch(self):

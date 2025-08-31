@@ -4,8 +4,7 @@
 import torch
 from torch import nn
 
-from yoloxocc.models.network_blocks import get_activation, C2PPLayer, C2aLayer, SelfTransformer
-from yoloxocc.utils import initialize_weights
+from yoloxocc.models.network_blocks import C2aLayer, C2PPLayer
 
 import ssl
 context = ssl._create_unverified_context()
@@ -18,20 +17,16 @@ class RegnetNeckPAN(nn.Module):
         model="regnet_x_800mf",
         model_reduce=4, # 模型深度缩减
         in_features=("trans3", "trans4", "trans5"),
-        in_channels=[256, 512, 1024],
+        channels=[256, 512, 1024],
         out_features=("bev_backbone3", "bev_backbone4", "bev_backbone5"),
         act="silu",
-        pp_repeats=0,
-        transformer=False,
-        heads=8,
-        drop_rate=0.,
         layer_type=C2aLayer,
         n=2,
+        pp_repeats=0,
+        drop_rate=0.,
     ):
         super().__init__()
-        assert len(in_features) == len(in_channels) and len(in_features) == 3
         self.in_features = in_features
-        self.in_channels = in_channels
         self.out_features = out_features
 
         # 加载预训练模型
@@ -41,7 +36,6 @@ class RegnetNeckPAN(nn.Module):
         del self.model.avgpool
         del self.model.fc
         # 模型深度缩减
-        self.output_channels = []
         new_lens = []
         for idx in range(self.model.trunk_output.__len__()):
             if model_reduce > 1:
@@ -50,48 +44,36 @@ class RegnetNeckPAN(nn.Module):
                 if del_len > 0:
                     del self.model.trunk_output[idx][-del_len:]
             new_lens.append(self.model.trunk_output[idx].__len__())
-            self.output_channels.append(self.model.trunk_output[idx][-1].f[0].out_channels)
-        print(f"{model} {model_reduce}: LENS={new_lens}, CHANNELS={self.output_channels}")
+        print(f"{model} {model_reduce}: LENS={new_lens}")
 
         # 训练参数
         for p in self.model.parameters():
             p.requires_grad = True  # for training
 
         self.csp4 = layer_type(
-            int((self.output_channels[-2] + in_channels[1])),
-            int(self.output_channels[-2]),
+            int(channels[1] * 2),
+            int(channels[1]),
             n,
             act=act,
         )
         self.csp5 = layer_type(
-            int((self.output_channels[-1] + in_channels[2])),
-            int(self.output_channels[-1]),
+            int(channels[2] * 2),
+            int(channels[2]),
             n,
             act=act,
         )
 
-        initialize_weights(self.csp4)
-        initialize_weights(self.csp5)
-		
         self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
         # last_layer
-        self.last_layer = nn.Sequential(
-            nn.Identity() if pp_repeats==0 else C2PPLayer(
-                in_channels[2],
-                in_channels[2],
-                n=pp_repeats,
-                act=act,
-                drop_rate=drop_rate,
-            ),
-            nn.Identity() if transformer==False else SelfTransformer(
-                in_channels[2],
-                heads=heads,
-                act=act,
-                drop_rate=drop_rate,
-            ),
+        self.last_layer = nn.Identity() if pp_repeats==0 else C2PPLayer(
+            channels[2],
+            channels[2],
+            n=pp_repeats,
+            act=act,
+            drop_rate=drop_rate,
         )
-        initialize_weights(self.last_layer)
+
 
     def forward(self, inputs):
         """
@@ -100,26 +82,25 @@ class RegnetNeckPAN(nn.Module):
         Returns:
             Tuple[Tensor]: FPN feature.
         """
-
         features = [inputs[f] for f in self.in_features]
         [x3, x4, x5] = features
 
         outputs = inputs
 
-        x = x3 # 256->256/8
-        outputs[self.out_features[0]] = x # 256/8
+        x = x3 # s8
+        outputs[self.out_features[0]] = x # s8
 
-        x = self.model.trunk_output[-2](x) # 256->256/16
-        x = torch.cat([x, x4], 1) # 256->512/16
-        x = self.csp4(x) # 512->512/16
-        outputs[self.out_features[1]] = x
+        x = self.model.trunk_output[-2](x) # s16
+        x = torch.cat([x, x4], 1)
+        x = self.csp4(x)
+        outputs[self.out_features[1]] = x # s16
 
-        x = self.model.trunk_output[-1](x) # 512->512/32
-        x = torch.cat([x, x5], 1) # 512->1024/32
-        x = self.csp5(x) # 1024->1024/32
+        x = self.model.trunk_output[-1](x) # s32
+        x = torch.cat([x, x5], 1)
+        x = self.csp5(x)
         if self.training:
             x = self.drop(x)
         x = self.last_layer(x)
-        outputs[self.out_features[2]] = x
+        outputs[self.out_features[2]] = x # s32
 
         return outputs

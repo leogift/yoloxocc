@@ -83,15 +83,7 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
         inter_br = torch.min(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
         area_a = torch.prod(bboxes_a[:, 2:] - bboxes_a[:, :2], 1)
         area_b = torch.prod(bboxes_b[:, 2:] - bboxes_b[:, :2], 1)
-
-        w_d = torch.abs((bboxes_a[:, None, 0]+bboxes_a[:, None, 2])/2 \
-                - (bboxes_b[:, 0]+bboxes_b[:, 2])/2)
-        h_d = torch.abs((bboxes_a[:, None, 1]+bboxes_a[:, None, 3])/2 \
-                - (bboxes_b[:, 1]+bboxes_b[:, 3])/2)
         
-        union_tl = torch.min(bboxes_a[:, None, :2], bboxes_b[:, :2])
-        union_br = torch.max(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
-
     else:
         inter_tl = torch.max(
             (bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
@@ -104,28 +96,11 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
         area_a = torch.prod(bboxes_a[:, 2:], 1)
         area_b = torch.prod(bboxes_b[:, 2:], 1)
 
-        w_d = torch.abs(bboxes_a[:, None, 0] - bboxes_b[:, 0])
-        h_d = torch.abs(bboxes_a[:, None, 1] - bboxes_b[:, 1])
-
-        union_tl = torch.min(
-            (bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
-            (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2),
-        )
-        union_br = torch.max(
-            (bboxes_a[:, None, :2] + bboxes_a[:, None, 2:] / 2),
-            (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2),
-        )
-
     en = (inter_tl < inter_br).type(inter_tl.type()).prod(dim=2)
+
     area_i = torch.prod(inter_br - inter_tl, 2) * en  # * ((tl < br).all())
     iou = area_i / (area_a[:, None] + area_b - area_i).clamp(1e-7)
-
-    w_u = torch.abs(union_br[:, :, 0] - union_tl[:, :, 0])
-    h_u = torch.abs(union_br[:, :, 1] - union_tl[:, :, 1])
-
-    d_iou = (w_d ** 2 + h_d ** 2) / (w_u ** 2 + h_u ** 2).clamp(1e-7)
-    
-    return iou - d_iou
+    return iou
 
 
 def matrix_iou(a, b):

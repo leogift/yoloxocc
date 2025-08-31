@@ -109,7 +109,7 @@ def optimize_model(model: nn.Module) -> nn.Module:
             m.forward = m.fuseforward  # update forward
 
     for m in model.modules():
-        if type(m) in [RepSConv,RepBottleneck] and not hasattr(m, "RepSConv"):
+        if type(m) in [RepSConv] and not hasattr(m, "RepSConv"):
             m.switch_to_deploy()
             m.forward = m.fuseforward  # update forward
 

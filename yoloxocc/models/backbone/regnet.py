@@ -4,8 +4,7 @@
 import torch
 from torch import nn
 
-from yoloxocc.models.network_blocks import get_activation, C2PPLayer, SelfTransformer
-from yoloxocc.utils import initialize_weights
+from yoloxocc.models.network_blocks import C2PPLayer
 
 import ssl
 context = ssl._create_unverified_context()
@@ -19,8 +18,6 @@ class Regnet(nn.Module):
         model_reduce=1, # 模型深度缩减
         act="silu",
         pp_repeats=0,
-        transformer=False,
-        heads=8,
         drop_rate=0.,
     ):
         super().__init__()
@@ -51,22 +48,13 @@ class Regnet(nn.Module):
         self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
         # last_layer
-        self.last_layer = nn.Sequential(
-            nn.Identity() if pp_repeats==0 else C2PPLayer(
-                self.output_channels[-1],
-                self.output_channels[-1],
-                n=pp_repeats,
-                act=act,
-                drop_rate=drop_rate,
-            ),
-            nn.Identity() if transformer==False else SelfTransformer(
-                self.output_channels[-1],
-                heads=heads,
-                act=act,
-                drop_rate=drop_rate,
-            ),
+        self.last_layer = nn.Identity() if pp_repeats==0 else C2PPLayer(
+            self.output_channels[-1],
+            self.output_channels[-1],
+            n=pp_repeats,
+            act=act,
+            drop_rate=drop_rate,
         )
-        initialize_weights(self.last_layer)
 
 
     def forward(self, inputs):

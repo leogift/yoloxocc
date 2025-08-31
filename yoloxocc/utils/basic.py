@@ -75,3 +75,7 @@ def gaussian_radius(feature_size, min_overlap=0.985, stride=32):
     sq3 = math.sqrt(b3 ** 2 - 4 * a3 * c3)
     r3 = (b3 + sq3) / 2
     return min(r1, r2, r3) * stride / 32 + 0.5
+
+def special_multiples(input_num, base_num=8):
+    multiples = math.ceil(input_num / base_num)
+    return int(multiples * base_num)

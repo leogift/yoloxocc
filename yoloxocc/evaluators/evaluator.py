@@ -87,17 +87,16 @@ class Evaluator:
         """
         logger.info("Evaluate postprocess.")
 
-        metric_keys = ["occ_similarity", "occ_dice"]
         metric_list_dict = {}
-        for key in metric_keys:
-            metric_list_dict[key] = []
-
         for outputs in outputs_list:
-            for key in metric_keys:
-                if key in outputs:
-                    metric_list_dict[key].append(outputs[key])
+            if outputs is None:
+                continue
+            for key in outputs.keys():
+                if key not in metric_list_dict.keys():
+                    metric_list_dict[key] = []
+                metric_list_dict[key].append(outputs[key])
         
-        for key in metric_keys:
+        for key in metric_list_dict.keys():
             if len(metric_list_dict[key]) > 0:
                 metric_mean = sum(metric_list_dict[key]) / len(metric_list_dict[key])
                 eval_results["eval_metrics"][key] = metric_mean
