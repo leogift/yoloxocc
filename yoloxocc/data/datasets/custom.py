@@ -217,7 +217,7 @@ class CustomDataset(DatasetBase):
                 dimensions = instance["dimensions"]
                 location = instance["location"]
                 rotation = instance["rotation"]
-                annos.append(np.array([*location, rotation, category_id, *dimensions]))
+                annos.append(np.array([*location, *dimensions, rotation, category_id]))
 
             annos = np.stack(annos) if len(annos) > 0 else np.ones((0, 8))*(-1)
             lidars_annos_list.append(annos)
@@ -326,7 +326,7 @@ class CustomDataset(DatasetBase):
                 inds = np.random.choice(points.shape[0], self.max_lidar_points-points.shape[0], replace=True)
                 points = np.concatenate([points, points[inds]], axis=0)
             else:
-                points = np.ones((self.max_lidar_points, 3))*-1 # 3: X,Y,Z
+                raise Exception("no points")
             points_list.append(points)
         
         lidars_points = np.stack(points_list)
@@ -342,7 +342,7 @@ class CustomDataset(DatasetBase):
                 inds = np.random.choice(annos.shape[0], self.max_instances-annos.shape[0], replace=True)
                 annos = np.concatenate([annos, annos[inds]], axis=0)
             else:
-                annos = np.ones((self.max_instances, 8))*(-1) # 8: X,Y,Z,R,category,L,W,H
+                annos = np.ones((self.max_instances, 8))*(-1) # 8: X,Y,Z,L,W,H,R,category
             new_lidars_annos_list.append(annos)
         lidars_annos = np.stack(new_lidars_annos_list)
         lidars_extrin = np.stack(lidars_extrin_list)

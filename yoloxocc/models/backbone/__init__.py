@@ -3,3 +3,4 @@
 # Copyright (c) Hanqtech Inc. All rights reserved.
 
 from .regnet import Regnet
+from .bev_resnet import BEVResnet

@@ -45,7 +45,7 @@ if __name__ == '__main__':
     args = make_parser().parse_args()
 
     # Create RKNN object
-    rknn = RKNN()
+    rknn = RKNN(verbose=True)
     # RKNN config
     print('--> Config model')
     rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=3,
@@ -65,7 +65,8 @@ if __name__ == '__main__':
 
     # Build model
     print('--> Building model')
-    ret = rknn.build(do_quantization=args.quantization!=None, 
+    ret = rknn.build(do_quantization=True if args.quantization!=None else False,
+                    auto_hybrid=True if args.quantization!=None else False, 
                     dataset=args.quantization)
     if ret != 0:
         print('Build model failed!')

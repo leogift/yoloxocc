@@ -15,7 +15,7 @@ class Regnet(nn.Module):
     def __init__(
         self,
         model="regnet_x_800mf",
-        model_reduce=1, # 模型深度缩减
+        out_features=["backbone3", "backbone4", "backbone5"],
         act="silu",
         pp_repeats=0,
         drop_rate=0.,
@@ -28,29 +28,25 @@ class Regnet(nn.Module):
         # 丢弃分类头
         del self.model.avgpool
         del self.model.fc
-        # 模型深度缩减
-        self.output_channels = []
-        new_lens = []
-        for idx in range(self.model.trunk_output.__len__()):
-            if model_reduce > 1:
-                old_len = self.model.trunk_output[idx].__len__()
-                del_len = old_len*(model_reduce-1)//model_reduce
-                if del_len > 0:
-                    del self.model.trunk_output[idx][-del_len:]
-            new_lens.append(self.model.trunk_output[idx].__len__())
-            self.output_channels.append(self.model.trunk_output[idx][-1].f[0].out_channels)
-        print(f"{model} {model_reduce}: LENS={new_lens}, CHANNELS={self.output_channels}")
 
         # 训练参数
         for p in self.model.parameters():
             p.requires_grad = True  # for training
 
+        self.channels = [self.model.stem[0].out_channels]
+        # 模型深度
+        block_lens = []
+        for idx in range(self.model.trunk_output.__len__()):
+            block_lens.append(self.model.trunk_output[idx].__len__())
+            self.channels.append(self.model.trunk_output[idx][-1].f[0].out_channels)
+        print(f"{model}: LENS={block_lens}, CHANNELS={self.channels}")
+
         self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
         # last_layer
         self.last_layer = nn.Identity() if pp_repeats==0 else C2PPLayer(
-            self.output_channels[-1],
-            self.output_channels[-1],
+            self.channels[-1],
+            self.channels[-1],
             n=pp_repeats,
             act=act,
             drop_rate=drop_rate,

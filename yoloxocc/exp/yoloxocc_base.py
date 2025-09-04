@@ -65,7 +65,7 @@ class Exp(BaseExp):
         self.max_epoch = 240
         # minimum learning rate during warmup
         self.warmup_lr = 1e-6
-        self.min_lr_ratio = 0.001
+        self.min_lr_ratio = 0.01
         # learning rate for one image. During training, lr will multiply batchsize.
         self.basic_lr_per_img = 4e-3 / 64.0 # SGD: 0.04 / 64.0, Adam: 0.004 / 64.0
         # name of LRScheduler

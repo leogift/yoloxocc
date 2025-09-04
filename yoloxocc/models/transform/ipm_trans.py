@@ -13,18 +13,21 @@ import random
 class IPMTrans(nn.Module):
     def __init__(self,
         in_features=["backbone3", "backbone4", "backbone5"],
-        channels=[256, 512, 1024],
-        out_features=["trans3", "trans4", "trans5"],
+        in_channels=[256, 512, 1024],
+        out_features=["bev_s2", "bev_s4", "bev_s8"],
+        out_channels=None,
         act="silu",
-        layer_type=C2aLayer,
         n=2,
         vox_xyz_size=[128, 4, 128],
         world_xyz_bounds=[-32, 32, -2, 2, -32, 32],
     ):
         super().__init__()
         self.in_features = in_features
-        self.channels = channels
+        self.in_channels = in_channels
         self.out_features = out_features
+        if out_channels is None:
+            out_channels = in_channels
+        self.out_channels = out_channels
 
         # voxel
         self.vox_xyz_size = vox_xyz_size
@@ -48,23 +51,26 @@ class IPMTrans(nn.Module):
         self.perspective_mode = None # in ["gridsample", "remapping"]
 
         # bev compress
-        self.csp_s2 = layer_type(
-            channels[0]*vox_xyz_size[1],
-            channels[0],
+        self.csp_s2 = C2aLayer(
+            in_channels[0]*vox_xyz_size[1],
+            out_channels[0],
             n,
             act=act,
+            use_rep=True,
         )
-        self.csp_s4 = layer_type(
-            channels[1]*vox_xyz_size[1],
-            channels[1],
+        self.csp_s4 = C2aLayer(
+            in_channels[1]*vox_xyz_size[1],
+            out_channels[1],
             n,
             act=act,
+            use_rep=True,
         )
-        self.csp_s8 = layer_type(
-            channels[2]*vox_xyz_size[1],
-            channels[2],
+        self.csp_s8 = C2aLayer(
+            in_channels[2]*vox_xyz_size[1],
+            out_channels[2],
             n,
             act=act,
+            use_rep=True,
         )
 
 
@@ -112,22 +118,22 @@ class IPMTrans(nn.Module):
 
         # 从前视图到voxel
         mask_vox_s2 = valid_vox_s2.reshape(BS, 1, self.vox_xyz_size[1], -1).float() # BS, 1, Y, Z*X
-        mask_vox_s2 = mask_vox_s2.repeat(1, self.channels[0], 1, 1) # BS, C, Y, Z*X
-        mask_vox_s2 = mask_vox_s2.reshape(BS, self.channels[0]*self.vox_xyz_size[1], -1) # BS, C*Y, Z*X
+        mask_vox_s2 = mask_vox_s2.repeat(1, self.in_channels[0], 1, 1) # BS, C, Y, Z*X
+        mask_vox_s2 = mask_vox_s2.reshape(BS, self.in_channels[0]*self.vox_xyz_size[1], -1) # BS, C*Y, Z*X
         vox_s2 = vox_s2 * mask_vox_s2        
         vox_s2, _ = __u(vox_s2).max(dim=1) # B, C*Y, Z*X
         vox_s2 = vox_s2.reshape(B, -1, self.vox_xyz_size[2]//2, self.vox_xyz_size[0]//2) # B, C*Y, Z, X
 
         mask_vox_s4 = valid_vox_s4.reshape(BS, 1, self.vox_xyz_size[1], -1).float() # BS, 1, Y, Z*X
-        mask_vox_s4 = mask_vox_s4.repeat(1, self.channels[1], 1, 1)
-        mask_vox_s4 = mask_vox_s4.reshape(BS, self.channels[1]*self.vox_xyz_size[1], -1)
+        mask_vox_s4 = mask_vox_s4.repeat(1, self.in_channels[1], 1, 1)
+        mask_vox_s4 = mask_vox_s4.reshape(BS, self.in_channels[1]*self.vox_xyz_size[1], -1)
         vox_s4 = vox_s4 * mask_vox_s4
         vox_s4, _ = __u(vox_s4).max(dim=1)
         vox_s4 = vox_s4.reshape(B, -1, self.vox_xyz_size[2]//4, self.vox_xyz_size[0]//4)
 
         mask_vox_s8 = valid_vox_s8.reshape(BS, 1, self.vox_xyz_size[1], -1).float() # BS, 1, Y, Z*X
-        mask_vox_s8 = mask_vox_s8.repeat(1, self.channels[2], 1, 1)
-        mask_vox_s8 = mask_vox_s8.reshape(BS, self.channels[2]*self.vox_xyz_size[1], -1)
+        mask_vox_s8 = mask_vox_s8.repeat(1, self.in_channels[2], 1, 1)
+        mask_vox_s8 = mask_vox_s8.reshape(BS, self.in_channels[2]*self.vox_xyz_size[1], -1)
         vox_s8 = vox_s8 * mask_vox_s8
         vox_s8, _ = __u(vox_s8).max(dim=1)
         vox_s8 = vox_s8.reshape(B, -1, self.vox_xyz_size[2]//8, self.vox_xyz_size[0]//8)

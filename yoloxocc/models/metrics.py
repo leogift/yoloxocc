@@ -7,28 +7,36 @@ import torch.nn as nn
 
 # similarity metric
 class SimilarityMetric(nn.Module):
-    def forward(self, pred, target):
+    def forward(self, pred, target, mask=None):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
 
         target = target.type_as(pred)
+        if mask is None:
+            mask = torch.ones_like(pred)
+        mask = mask.type_as(pred)
 
-        metric = 1 - (torch.abs(pred - target)).mean()
+        distance = torch.abs(pred - target)
+        distance = (distance * mask).sum() / mask.sum().clamp(1e-7)
+        metric = 1 - distance
 
         return metric
 
 # iou metric
 class IOUMetric(nn.Module):
-    def forward(self, pred, target):
+    def forward(self, pred, target, mask=None):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
 
         target = target.type_as(pred)
+        if mask is None:
+            mask = torch.ones_like(pred)
+        mask = mask.type_as(pred)
 
-        intersection = (pred * target).sum()
-        union = pred.sum() + target.sum() - intersection
+        intersection = pred * target
+        union = (pred + target) - intersection
 
-        metric = intersection / union.clamp(1e-7)
+        metric = (intersection * mask).sum() / (union * mask).sum().clamp(1e-7)
 
         return metric
 
@@ -43,16 +51,19 @@ class HeatmapMetric(nn.Module):
         pred: tensor in Integer
         target: tensor in Integer
     '''
-    def forward(self, pred, target, debug=False):
+    def forward(self, pred, target, mask=None, debug=False):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
         
         target = target.type_as(pred)
+        if mask is None:
+            mask = torch.ones_like(pred)
+        mask = mask.type_as(pred)
 
         B, C, H, W = pred.shape
         metric = 0
         for c in range(C):
-            metric += self.metric_fn(pred[:, c], target[:, c])
+            metric += self.metric_fn(pred[:, c], target[:, c], mask[:, c])
 
             if debug: 
                 import cv2

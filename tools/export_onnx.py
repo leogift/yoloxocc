@@ -76,7 +76,7 @@ def main():
     ckpt_file = args.ckpt
 
     # load the model state dict
-    ckpt = torch.load(ckpt_file, map_location="cpu")
+    ckpt = torch.load(ckpt_file, map_location="cpu", weights_only=True)
 
     if "model" in ckpt:
         ckpt = ckpt["model"]

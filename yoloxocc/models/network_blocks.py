@@ -4,9 +4,13 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.layers import DropPath
+import math
 
 from yoloxocc.utils.model_utils import fuse_conv_and_bn
+from yoloxocc.utils import special_multiples
+
 
 class SiLU(nn.Module):
     """export-friendly version of nn.SiLU()"""
@@ -73,14 +77,14 @@ class Bottleneck(nn.Module):
         act="silu",
     ):
         super().__init__()
-        hidden_channels = int(out_channels * expansion)
+        hidden_channels = special_multiples(out_channels * expansion)
 
         self.conv1 = BaseConv(in_channels, hidden_channels, 3, stride=1, act=act)
         self.conv2 = BaseConv(hidden_channels, out_channels, 1, stride=1, act="")
 
         self.use_add = in_channels == out_channels
         self.act = get_activation(act)()
-
+        
     def forward(self, x):
         y = self.conv1(x)
         y = self.conv2(y)
@@ -104,13 +108,15 @@ class RepSConv(nn.Module):
         self.out_channels = out_channels
 
         self.cv = BaseConv(in_channels, out_channels, 3, stride=1, act="")
-        
-        self.cv_1x1 = BaseConv(in_channels, out_channels, 1, stride=1, act="")
-        
+
+        self.cv_1x1 = nn.Conv2d(in_channels, out_channels, 1, stride=1, padding=0, bias=True)
+        self.cv_1x3 = nn.Conv2d(in_channels, out_channels, (1, 3), stride=1, padding=(0, 1), bias=True)
+        self.cv_3x1 = nn.Conv2d(in_channels, out_channels, (3, 1), stride=1, padding=(1, 0), bias=True)
+
         self.act = get_activation(act)()
 
     def forward(self, x):
-        y = self.cv(x) + self.cv_1x1(x)
+        y = self.cv(x) + self.cv_1x1(x) + self.cv_1x3(x) + self.cv_3x1(x)
         y = self.act(y)
 
         return y
@@ -119,16 +125,38 @@ class RepSConv(nn.Module):
         y = self.repSConv(x)
         return self.act(y)
 
-    def get_equivalent_kernel_bias(self, cv, cv_1x1):
-        kernel1x1, bias1x1 = self._fuse_bn_tensor(cv_1x1)
-        kernel3x3, bias3x3 = self._fuse_bn_tensor(cv)
-        return kernel3x3 + self._pad_1x1_to_3x3_tensor(kernel1x1), bias3x3 + bias1x1
+    def get_equivalent_kernel_bias(self):
+        kernel, bias = self._fuse_bn_tensor(self.cv)
+        kernel1x1, bias1x1 = self.cv_1x1.weight, self.cv_1x1.bias
+        kernel1x3, bias1x3 = self.cv_1x3.weight, self.cv_1x3.bias
+        kernel3x1, bias3x1 = self.cv_3x1.weight, self.cv_3x1.bias
+
+        kernel = kernel \
+                + self._pad_1x1_to_3x3_tensor(kernel1x1) \
+                + self._pad_1x3_to_3x3_tensor(kernel1x3) \
+                + self._pad_3x1_to_3x3_tensor(kernel3x1)
+        
+        bias = bias + bias1x1 + bias1x3 + bias3x1
+        
+        return kernel, bias
 
     def _pad_1x1_to_3x3_tensor(self, kernel1x1):
         if kernel1x1 is None:
             return 0
         
         return torch.nn.functional.pad(kernel1x1, [1, 1, 1, 1])
+
+    def _pad_1x3_to_3x3_tensor(self, kernel1x3):
+        if kernel1x3 is None:
+            return 0
+        
+        return torch.nn.functional.pad(kernel1x3, [0, 0, 1, 1])
+
+    def _pad_3x1_to_3x3_tensor(self, kernel3x1):
+        if kernel3x1 is None:
+            return 0
+        
+        return torch.nn.functional.pad(kernel3x1, [1, 1, 0, 0])
 
     def _fuse_bn_tensor(self, branch):
         if branch is None:
@@ -138,9 +166,9 @@ class RepSConv(nn.Module):
             branch.conv = fuse_conv_and_bn(branch.conv, branch.bn)  # update conv
             delattr(branch, "bn")  # remove batchnorm
             branch.forward = branch.fuseforward  # update forward
+        
+        kernel, bias = branch.conv.weight, branch.conv.bias
 
-        kernel = branch.conv.weight
-        bias = branch.conv.bias
         return kernel, bias
 
     def switch_to_deploy(self):
@@ -155,13 +183,15 @@ class RepSConv(nn.Module):
                                 groups=1,
                                 bias=True)
         
-        self.repSConv.weight.data, self.repSConv.bias.data = self.get_equivalent_kernel_bias(self.cv, self.cv_1x1)
+        self.repSConv.weight.data, self.repSConv.bias.data = self.get_equivalent_kernel_bias()
 
         for para in self.parameters():
             para.detach_()
 
         delattr(self, "cv")
         delattr(self, "cv_1x1")
+        delattr(self, "cv_1x3")
+        delattr(self, "cv_3x1")
 
 
 class RepBottleneck(nn.Module):
@@ -174,7 +204,7 @@ class RepBottleneck(nn.Module):
         act="silu",
     ):
         super().__init__()
-        hidden_channels = int(out_channels * expansion)
+        hidden_channels = special_multiples(out_channels * expansion)
 
         self.conv1 = RepSConv(in_channels, hidden_channels, act=act)
         self.conv2 = BaseConv(hidden_channels, out_channels, 1, stride=1, act="")
@@ -199,7 +229,8 @@ class C2aLayer(nn.Module):
         out_channels=None,
         n=1,
         act="silu",
-        drop_rate=0.
+        drop_rate=0.,
+        use_rep=True,
     ):
         """
         Args:
@@ -210,14 +241,18 @@ class C2aLayer(nn.Module):
         super().__init__()
         if out_channels is None:
             out_channels = in_channels
-        self.hidden_channels = out_channels//2  # hidden channels
+        self.hidden_channels = special_multiples(out_channels//2)
         
         self.cv1 = BaseConv(in_channels, 2 * self.hidden_channels, 1, stride=1, act=act)
         self.m = nn.ModuleList(
             RepBottleneck(
-                self.hidden_channels, self.hidden_channels, act=act
+                self.hidden_channels, self.hidden_channels, act=act, 
             )
-            for _ in range(n)
+            if use_rep else
+            Bottleneck(
+                self.hidden_channels, self.hidden_channels, act=act, 
+            )
+            for _n in range(n)
         )
         self.cv2 = BaseConv(2 * self.hidden_channels, out_channels, 1, stride=1, act=act)
         self.droppath = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
@@ -249,7 +284,7 @@ class C2PPLayer(nn.Module):
         super().__init__()
         if out_channels is None:
             out_channels = in_channels
-        self.hidden_channels = out_channels//2  # hidden channels
+        self.hidden_channels = special_multiples(out_channels//2)
         
         self.cv1 = BaseConv(in_channels, 2 * self.hidden_channels, 1, stride=1, act=act)
         self.pp = nn.ModuleList()
@@ -257,7 +292,7 @@ class C2PPLayer(nn.Module):
             self.pp.append(
                 nn.Sequential(
                     *[
-                        nn.MaxPool2d(kernel_size=3, stride=1, padding=1)
+                        nn.MaxPool2d(3, stride=1, padding=1)
                         for _n in range(n)
                     ],
                 )
@@ -269,8 +304,11 @@ class C2PPLayer(nn.Module):
         x = self.cv1(x)
         x_1, x_2 = x.split((self.hidden_channels, self.hidden_channels), 1)
 
+        x_m = x_2
         for idx in range(3):
-            x_2 = self.pp[idx](x_2) + x_2
+            x_2 = self.pp[idx](x_2)
+            x_m = x_m + x_2
+        x_2 = x_m
 
         if self.training:
             y = torch.cat((self.droppath(x_1), x_2), dim=1)
@@ -278,3 +316,24 @@ class C2PPLayer(nn.Module):
             y = torch.cat((x_1, x_2), dim=1)
 
         return self.cv2(y)
+
+
+class STNLayer(nn.Module):
+    def __init__(self,
+        H, W,
+        act="silu",
+    ):
+        super().__init__()
+        self.linear = nn.Linear(H*W, H*W, bias=True)
+        self.linear.weight.data = torch.eye(H*W).view(H*W, H*W).requires_grad_(True)
+        self.linear.bias.data = torch.zeros(H*W).requires_grad_(True)
+        self.linear.requires_grad_(True)
+
+        self.act = get_activation(act)()
+
+    def forward(self, x):
+        B, C, H, W = x.shape
+        y = x.view(B, C, -1)
+        y = self.linear(y)
+        y = y.view(B, C, H, W)
+        return self.act(y)

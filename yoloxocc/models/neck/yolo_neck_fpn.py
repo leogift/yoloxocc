@@ -8,16 +8,14 @@ import torch.nn as nn
 from yoloxocc.models.network_blocks import get_activation, C2aLayer
 
 class YOLONeckFPN(nn.Module):
-
     def __init__(
         self,
         in_features=("backbone3", "backbone4", "backbone5"),
-        channels=[256, 512, 1024],
         out_features=("fpn3", "fpn4", "fpn5"),
+        channels=None,
         act="silu",
-        layer_type=C2aLayer,
-        simple_reshape=False,
         n=2,
+        simple_reshape=False,
     ):
         super().__init__()
         self.in_features = in_features
@@ -25,41 +23,48 @@ class YOLONeckFPN(nn.Module):
 
         # upsample and conv
         self.upsample5_4 = nn.Sequential(*[
-            nn.ConvTranspose2d(
-                int(channels[2]), 
-                int(channels[2]), 
-                kernel_size=4, 
-                stride=2, 
-                padding=1,
-                groups=int(channels[2]),
-                bias=True
-            ),
-            get_activation(act)()
-        ]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
-        self.upsample4_3 = nn.Sequential(*[
-            nn.ConvTranspose2d(
-                int(channels[1]), 
-                int(channels[1]), 
-                kernel_size=4, 
-                stride=2, 
-                padding=1,
-                groups=int(channels[1]),
-                bias=True
-            ),
-            get_activation(act)()
-        ]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
-
-        self.csp4 = layer_type(
-            int((channels[2] + channels[1])),
-            int(channels[1]),
+                nn.ConvTranspose2d(
+                    channels[2], 
+                    channels[2], 
+                    kernel_size=4, 
+                    stride=2, 
+                    padding=1,
+                    groups=channels[2],
+                    bias=True),
+                get_activation(act)()
+            ]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
+        self.upsample4_3 =nn.Sequential(*[
+                nn.ConvTranspose2d(
+                    channels[1], 
+                    channels[1], 
+                    kernel_size=4, 
+                    stride=2, 
+                    padding=1,
+                    groups=channels[1],
+                    bias=True),
+                get_activation(act)()
+            ]) if simple_reshape==False else nn.Upsample(scale_factor=2, mode="bilinear")
+        
+        self.csp5 = C2aLayer(
+            channels[2],
+            channels[2],
             n,
             act=act,
+            use_rep=True,
         )
-        self.csp3 = layer_type(
-            int((channels[1] + channels[0])),
-            int(channels[0]),
+        self.csp4 = C2aLayer(
+            channels[1] + channels[2],
+            channels[1],
             n,
             act=act,
+            use_rep=True,
+        )
+        self.csp3 = C2aLayer(
+            channels[0] + channels[1],
+            channels[0],
+            n,
+            act=act,
+            use_rep=True,
         )
 
 
@@ -72,10 +77,9 @@ class YOLONeckFPN(nn.Module):
         """
         features = [inputs[f] for f in self.in_features]
         [x3, x4, x5] = features
-
         outputs = inputs
 
-        x = x5
+        x = self.csp5(x5)
         outputs[self.out_features[2]] = x # s32
 
         x = self.upsample5_4(x) # s16

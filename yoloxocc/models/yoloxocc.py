@@ -6,9 +6,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from yoloxocc.models.losses import HeatmapLoss, BalanceLoss, UncertaintyLoss, DiceLoss
-from yoloxocc.models.metrics import HeatmapMetric, SimilarityMetric, IOUMetric
 from yoloxocc.utils import basic, geom, VoxUtil
+
+import numpy as np
+import cv2
 
 # 模型框架
 class YOLOXOCC(nn.Module):
@@ -24,12 +25,15 @@ class YOLOXOCC(nn.Module):
                 neck=None, # fpn
                 transform=None, # remapping/perspective
                 bev_augment=None,
+                bev_backbone=None,
                 bev_neck=None, # bev fpn
                 occ_head=None, # occ head
                 aux_occ_head_list=[], # 辅助occ head
                 world_xyz_bounds = [-32, 32, -2, 2, -32, 32], # 世界坐标范围 单位m
                 vox_xyz_size=[128, 4, 128], # 体素坐标大小 单位格子
                 use_gaussian_mask=False, # 是否使用gaussian mask
+                ego_mask_world_x=0.8, # ego宽 单位m
+                ego_mask_world_z=1.2, # ego长 单位m
             ):
         super().__init__()
 
@@ -43,6 +47,8 @@ class YOLOXOCC(nn.Module):
         self.transform = nn.Identity() if transform is None else transform
         self.bev_augment = bev_augment
         
+        # bev backbone
+        self.bev_backbone = nn.Identity() if bev_backbone is None else bev_backbone
         # bev neck: fpn
         self.bev_neck = nn.Identity() if transform is None else bev_neck
 
@@ -53,20 +59,6 @@ class YOLOXOCC(nn.Module):
         for aux_occ_head in aux_occ_head_list:
             self.aux_occ_head_list.append(aux_occ_head)
 
-        # loss functions
-        self.bce_loss = HeatmapLoss()
-        self.diff_loss = HeatmapLoss(BalanceLoss())
-        self.dice_loss = HeatmapLoss(DiceLoss())
-
-        # uncertainty loss
-        self.bce_uncertainty_loss = UncertaintyLoss()
-        self.diff_uncertainty_loss = UncertaintyLoss()
-        self.dice_uncertainty_loss = UncertaintyLoss()
-		
-		# metric
-        self.similarity_metric = HeatmapMetric(SimilarityMetric())
-        self.iou_metric = HeatmapMetric(IOUMetric())
-		
         # 预制grid
         self.grid3d_s2 = basic.cloudgrid3d(1, vox_xyz_size[0]//2, vox_xyz_size[1], vox_xyz_size[2]//2)
         self.grid3d_s4 = basic.cloudgrid3d(1, vox_xyz_size[0]//4, vox_xyz_size[1], vox_xyz_size[2]//4)
@@ -80,29 +72,40 @@ class YOLOXOCC(nn.Module):
 
         # gaussian mask
         if use_gaussian_mask:
-            self.gaussian_mask = self.get_gaussian_mask(world_xyz_bounds, vox_xyz_size)
+            self.gaussian_mask = self.get_gaussian_mask(world_xyz_bounds, vox_xyz_size,
+                                        ego_mask_world_x=ego_mask_world_x,
+                                        ego_mask_world_z=ego_mask_world_z)
         else:
             self.gaussian_mask = torch.ones((1, 1, vox_xyz_size[2], vox_xyz_size[0]), dtype=torch.float32)
 
     # gaussian mask for voxel
     def get_gaussian_mask(self,
                    world_xyz_bounds,
-                   vox_xyz_size):
-        import cv2
+                   vox_xyz_size,
+                   ego_mask_world_x=1.0,
+                   ego_mask_world_z=1.0):
         world_xmin, world_xmax, world_ymin, world_ymax, world_zmin, world_zmax = world_xyz_bounds
         vox_x, vox_y, vox_z = vox_xyz_size
         max_vox_zx = max(vox_z, vox_x)
         vox_xmin = vox_x/(world_xmax-world_xmin)*world_xmin
         vox_zmin = vox_z/(world_zmax-world_zmin)*world_zmin
         ksize = max_vox_zx*2+1
-        sigma = 0.3 * ((ksize - 1) * 0.5 - 1) + 0.8
-        gaussian_mask = cv2.getGaussianKernel(ksize, sigma)
-        gaussian_mask = (gaussian_mask.dot(gaussian_mask.T))**0.5 # 2d gaussian
-        mask_z, mask_x = gaussian_mask.shape
+        sigma = max_vox_zx
+        _gaussian_mask = cv2.getGaussianKernel(ksize, sigma) # 边缘 0.5
+        _gaussian_mask = (_gaussian_mask.dot(_gaussian_mask.T)) # 2d gaussian
+        _gaussian_mask = (_gaussian_mask-_gaussian_mask.min()) / (_gaussian_mask.max()-_gaussian_mask.min())
+        mask_z, mask_x = _gaussian_mask.shape
+        # 去掉ego灯下黑
+        ego_mask_vox_x = vox_x * ego_mask_world_x/(world_xmax-world_xmin) # ego X size
+        ego_mask_vox_z = vox_z * ego_mask_world_z/(world_zmax-world_zmin) # ego Z size
+        _gaussian_mask[round(mask_z/2-ego_mask_vox_z/2):round(mask_z/2+ego_mask_vox_z/2), 
+                        round(mask_x/2-ego_mask_vox_x/2):round(mask_x/2+ego_mask_vox_x/2)] = 0
         offset_vox_z = mask_z//2 + int(vox_zmin)
         offset_vox_x = mask_x//2 + int(vox_xmin)
-        gaussian_mask = gaussian_mask[offset_vox_z:offset_vox_z+vox_z, offset_vox_x:offset_vox_x+vox_x]
-        gaussian_mask = (gaussian_mask-gaussian_mask.min()) / (gaussian_mask.max()-gaussian_mask.min())
+        gaussian_mask = _gaussian_mask[offset_vox_z:offset_vox_z+vox_z, offset_vox_x:offset_vox_x+vox_x]
+        # gaussian_mask_np = (gaussian_mask*255).astype(np.uint8)
+        # cv2.imwrite("gaussian_mask.png", gaussian_mask_np)
+        # exit(-1)
         return torch.from_numpy(gaussian_mask[None,None,:,:]).float()
 
     def prepare_forward(self, cameras_image, cameras_extrin, cameras_intrin):
@@ -159,6 +162,7 @@ class YOLOXOCC(nn.Module):
         return datas
 
     def _forward_bev_(self, datas):
+        datas = self.bev_backbone(datas)
         datas = self.bev_neck(datas)
 
         return datas
@@ -215,43 +219,42 @@ class YOLOXOCC(nn.Module):
         valid_vox_mask = valid_vox_mask * self.gaussian_mask
 
         if self.training:
+            outputs = {"total_loss":0}
+            occ_total_loss = 0
             # occ main loss
-            occ_total_loss, occ_bce_loss, occ_diff_loss, occ_dice_loss \
-                = self.get_occ_losses(occ_pred, occ_centermask_target, valid_vox_mask)
+            occ_losses \
+                = self.occ_head.get_losses(occ_pred, occ_centermask_target, valid_vox_mask)
+            occ_total_loss += occ_losses["total_loss"]
+            for key in occ_losses:
+                new_key = "occ_" + key
+                outputs[new_key] = occ_losses[key]
 
             # aux occ loss
             aux_occ_total_loss = 0
             for aux_occ_preds in aux_occ_preds_list:
-                _aux_occ_total_loss, _, _, _ \
-                    = self.get_occ_losses(aux_occ_preds, occ_centermask_target, valid_vox_mask, uncertainty=False)
-                aux_occ_total_loss += 0.1 * _aux_occ_total_loss
+                aux_occ_losses \
+                    = self.occ_head.get_losses(aux_occ_preds, occ_centermask_target, valid_vox_mask, uncertainty=False)
+                aux_occ_total_loss += 0.1 * aux_occ_losses["total_loss"]
 
             if len(aux_occ_preds_list) > 0:
                 aux_occ_total_loss = aux_occ_total_loss/len(aux_occ_preds_list)
                 occ_total_loss += aux_occ_total_loss
-
+                
+                outputs["aux_occ_loss"] = aux_occ_total_loss
+            
             total_loss = occ_total_loss
 
             # train outputs
-            outputs = {
-                "total_loss": total_loss,
-                "occ_total_loss": occ_total_loss,
-                "occ_bce_loss": occ_bce_loss,
-                "occ_diff_loss": occ_diff_loss,
-                "occ_dice_loss": occ_dice_loss,
-                "aux_occ_total_loss": aux_occ_total_loss,
-            }
+            outputs["total_loss"] = total_loss
 
         else:
+            outputs = {}
             with torch.no_grad():
-                occ_similarity = self.get_occ_similarity(occ_pred, occ_centermask_target, valid_vox_mask)
-                occ_iou = self.get_occ_iou(occ_pred, occ_centermask_target, valid_vox_mask)
-
-            # eval outputs
-            outputs = {
-                "occ_similarity": occ_similarity,
-                "occ_iou": occ_iou,
-            }
+                occ_metrics = self.occ_head.get_metrics(occ_pred, occ_centermask_target, valid_vox_mask)
+            
+            for key in occ_metrics:
+                new_key = "occ_" + key
+                outputs[new_key] = occ_metrics[key]
 
         return outputs
 
@@ -292,78 +295,3 @@ class YOLOXOCC(nn.Module):
 
     # END: export forward
     # ------------------------------------------------
-
-    # losses
-    def get_occ_losses(
-        self,
-        pred,
-        target,
-        valid_mask,
-        uncertainty=True
-    ):
-        # B,Y,Z,X
-        assert pred.shape[:2] == target.shape[:2] == valid_mask.shape[:2], \
-            f"expect {pred.shape[:2]} == {target.shape[:2]} == {valid_mask.shape[:2]}"
-
-        # 对齐
-        Zp,Xp = pred.shape[2:]
-        _target = F.interpolate(target, (Zp,Xp), mode="bilinear", align_corners=True)
-        _valid_mask = F.interpolate(valid_mask, (Zp,Xp), mode="nearest")
-        _pred = pred
-
-        # losses
-        bce_loss = self.bce_loss(_pred*_valid_mask, (_target*_valid_mask).round())
-        diff_loss  = self.diff_loss((_pred*_valid_mask).sigmoid(), _target*_valid_mask)
-        dice_loss = self.dice_loss((_pred*_valid_mask).sigmoid(), (_target*_valid_mask).round())
-
-        if uncertainty:
-            # uncertainty weight
-            bce_loss = self.bce_uncertainty_loss(bce_loss)
-            diff_loss = self.diff_uncertainty_loss(diff_loss, 5)
-            dice_loss = self.dice_uncertainty_loss(dice_loss, 2)
-
-        total_loss = bce_loss + diff_loss + dice_loss
-
-        return total_loss, bce_loss, diff_loss, dice_loss
-
-    # similarity
-    def get_occ_similarity(
-        self,
-        pred,
-        target,
-        valid_mask,
-    ):
-        # B,Y,Z,X
-        assert pred.shape[:2] == target.shape[:2] == valid_mask.shape[:2], \
-            f"expect {pred.shape[:2]} == {target.shape[:2]} == {valid_mask.shape[:2]}"
-
-        # 对齐
-        Zp,Xp = pred.shape[2:]
-        _target = F.interpolate(target, (Zp,Xp), mode="nearest")
-        _valid_mask = F.interpolate(valid_mask, (Zp,Xp), mode="nearest")
-        _pred = pred
-
-        similarity = self.similarity_metric((_pred*_valid_mask).sigmoid(), _target*_valid_mask, debug=True)
-
-        return similarity
-
-    # dice
-    def get_occ_iou(
-        self,
-        pred,
-        target,
-        valid_mask,
-    ):
-        # B,Y,Z,X
-        assert pred.shape[:2] == target.shape[:2] == valid_mask.shape[:2], \
-            f"expect {pred.shape[:2]} == {target.shape[:2]} == {valid_mask.shape[:2]}"
-
-        # 对齐
-        Zp,Xp = pred.shape[2:]
-        _target = F.interpolate(target, (Zp,Xp), mode="bilinear", align_corners=True)
-        _valid_mask = F.interpolate(valid_mask, (Zp,Xp), mode="nearest")
-        _pred = pred
-
-        iou = self.iou_metric((_pred*_valid_mask).sigmoid(), (_target*_valid_mask).round())
-
-        return iou

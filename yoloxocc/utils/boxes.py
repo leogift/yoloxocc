@@ -103,6 +103,51 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
     return iou
 
 
+def ray_iou(bboxes_a, bboxes_b, \
+        center, angle_threshold=15, \
+        xyxy=True
+    ):
+    if bboxes_a.shape[1] != 4 or bboxes_b.shape[1] != 4:
+        raise IndexError
+    
+    if xyxy:
+        outer_tl = torch.min(bboxes_a[:, None, :2], bboxes_b[:, :2])
+        outer_br = torch.max(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
+
+        bboxes_a_center = (bboxes_a[:, :2] + bboxes_a[:, 2:]) / 2
+        bboxes_b_center = (bboxes_b[:, :2] + bboxes_b[:, 2:]) / 2
+        
+    else:
+        outer_tl = torch.min(
+            (bboxes_a[:, None, :2] - bboxes_a[:, None, 2:] / 2),
+            (bboxes_b[:, :2] - bboxes_b[:, 2:] / 2),
+        )
+        outer_br = torch.max(
+            (bboxes_a[:, None, :2] + bboxes_a[:, None, 2:] / 2),
+            (bboxes_b[:, :2] + bboxes_b[:, 2:] / 2),
+        )
+
+        bboxes_a_center = bboxes_a[:, :2]
+        bboxes_b_center = bboxes_b[:, :2]
+
+    # 计算bbox中心到圆心的角度
+    bboxes_a_trans = bboxes_a_center - center
+    bboxes_a_angle = torch.atan2(bboxes_a_trans[:, :, 1], bboxes_a_trans[:, :, 0])
+    bboxes_b_trans = bboxes_b_center - center
+    bboxes_b_angle = torch.atan2(bboxes_b_trans[:, :, 1], bboxes_b_trans[:, :, 0])
+
+    # diou
+    bboxes_center_dist = torch.norm(bboxes_a - bboxes_b, dim=2)
+    bboxes_outer_dist = torch.norm(outer_tl - outer_br, dim=2)
+    diou = bboxes_center_dist * en / bboxes_outer_dist.clamp(1e-7)
+
+    # 射线角nms
+    bboxes_angle = torch.abs(bboxes_a_angle - bboxes_b_angle) % np.pi
+    en = (bboxes_angle < angle_threshold).type(bboxes_a.type())
+
+    return diou * en
+
+
 def matrix_iou(a, b):
     """
     return iou of a and b, numpy version for data augenmentation
