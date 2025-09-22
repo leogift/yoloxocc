@@ -37,7 +37,7 @@ def make_parser():
         default=None,
         help="Specify an input shape for inference.",
     )
-    
+
     return parser
 
 
@@ -48,7 +48,8 @@ if __name__ == '__main__':
     rknn = RKNN(verbose=True)
     # RKNN config
     print('--> Config model')
-    rknn.config(quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=3,
+    rknn.config(mean_values=[[0,0,0]], std_values=[[1,1,1]],
+                quant_img_RGB2BGR=True, target_platform=args.platform, optimization_level=2,
                 quantized_algorithm="kl_divergence",
                 enable_flash_attention=True,
                 disable_rules=['fuse_mul_into_matmul']

@@ -19,12 +19,12 @@ def camera_intrinsic_2_fov(camera_intrinsics:np.ndarray):
 
 
 if __name__ == '__main__':
-    print("fov_2_camera_intrinsic", fov_2_camera_intrinsic(fov_x=102,fov_y=60, \
-        pixel_width=1280, pixel_height=720))
+    # print("fov_2_camera_intrinsic", fov_2_camera_intrinsic(fov_x=102,fov_y=60, \
+    #     pixel_width=1280, pixel_height=720))
     
     camera_intrinsics = np.eye(3)
-    camera_intrinsics[0,0] = 200
-    camera_intrinsics[0,2] = 256
-    camera_intrinsics[1,1] = 200
-    camera_intrinsics[1,2] = 119
+    camera_intrinsics[0,0] = 790
+    camera_intrinsics[0,2] = 971
+    camera_intrinsics[1,1] = 789
+    camera_intrinsics[1,2] = 568
     print("camera_intrinsic_2_fov", camera_intrinsic_2_fov(camera_intrinsics))

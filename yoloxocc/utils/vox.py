@@ -12,9 +12,6 @@ class VoxUtil():
         self.vox_x_size, self.vox_y_size, self.vox_z_size = vox_xyz_size
         self.world_xmin, self.world_xmax, self.world_ymin, self.world_ymax, self.world_zmin, self.world_zmax = world_xyz_bounds
 
-        self.vox_per_world = min(self.vox_x_size/(self.world_xmax-self.world_xmin), \
-                                self.vox_z_size/(self.world_zmax-self.world_zmin))
-
         # voxel坐标系和参考坐标系互转
         self.vox_T_ref = None
         self.ref_T_vox = None
@@ -207,16 +204,16 @@ class VoxUtil():
 
                     dist = grid_zx - vox_zx # 1,N,2,Z,X
                     # z**2 + x**2
-                    dist = torch.sum(dist**2, dim=2, keepdim=False)/(radius**2)
+                    dist = torch.sum(dist**2, dim=2, keepdim=False)
                     # this is B x N x Z x X
-                    mask = torch.sqrt(torch.exp(-dist))
+                    mask = torch.exp(-dist/(2*radius*radius))
                     # 太远的值为0
-                    mask[mask < 0.01] = 0.0 # 1,N/Y,Z,X
+                    mask[mask < 0.001] = 0.0 # 1,N/Y,Z,X
                     mask = torch.max(mask, dim=1, keepdim=True)[0]
 
                 else:
                     mask = torch.zeros(1, 1, self.vox_z_size, self.vox_x_size)
-                
+
                 mask = mask.to(xyz_ref.device)
                 _centermask.append(mask)
 

@@ -32,8 +32,8 @@ class YOLOXOCC(nn.Module):
                 world_xyz_bounds = [-32, 32, -2, 2, -32, 32], # 世界坐标范围 单位m
                 vox_xyz_size=[128, 4, 128], # 体素坐标大小 单位格子
                 use_gaussian_mask=False, # 是否使用gaussian mask
-                ego_mask_world_x=0.8, # ego宽 单位m
-                ego_mask_world_z=1.2, # ego长 单位m
+                ego_dimention=[1.4, 0.8, 1.5], # ego长宽高 单位m
+                dimentions=[[1.4, 0.8, 1.5]], # 目标长宽高 单位m
             ):
         super().__init__()
 
@@ -73,17 +73,18 @@ class YOLOXOCC(nn.Module):
         # gaussian mask
         if use_gaussian_mask:
             self.gaussian_mask = self.get_gaussian_mask(world_xyz_bounds, vox_xyz_size,
-                                        ego_mask_world_x=ego_mask_world_x,
-                                        ego_mask_world_z=ego_mask_world_z)
+                                        ego_dimention=ego_dimention)
         else:
             self.gaussian_mask = torch.ones((1, 1, vox_xyz_size[2], vox_xyz_size[0]), dtype=torch.float32)
+
+        self.dimentions = np.array(dimentions)
 
     # gaussian mask for voxel
     def get_gaussian_mask(self,
                    world_xyz_bounds,
                    vox_xyz_size,
-                   ego_mask_world_x=1.0,
-                   ego_mask_world_z=1.0):
+                   ego_dimention=[1.0,1.0,1.0],
+            ):
         world_xmin, world_xmax, world_ymin, world_ymax, world_zmin, world_zmax = world_xyz_bounds
         vox_x, vox_y, vox_z = vox_xyz_size
         max_vox_zx = max(vox_z, vox_x)
@@ -96,16 +97,13 @@ class YOLOXOCC(nn.Module):
         _gaussian_mask = (_gaussian_mask-_gaussian_mask.min()) / (_gaussian_mask.max()-_gaussian_mask.min())
         mask_z, mask_x = _gaussian_mask.shape
         # 去掉ego灯下黑
-        ego_mask_vox_x = vox_x * ego_mask_world_x/(world_xmax-world_xmin) # ego X size
-        ego_mask_vox_z = vox_z * ego_mask_world_z/(world_zmax-world_zmin) # ego Z size
+        ego_mask_vox_x = vox_x * ego_dimention[1]/(world_xmax-world_xmin) # ego X size
+        ego_mask_vox_z = vox_z * ego_dimention[0]/(world_zmax-world_zmin) # ego Z size
         _gaussian_mask[round(mask_z/2-ego_mask_vox_z/2):round(mask_z/2+ego_mask_vox_z/2), 
                         round(mask_x/2-ego_mask_vox_x/2):round(mask_x/2+ego_mask_vox_x/2)] = 0
         offset_vox_z = mask_z//2 + int(vox_zmin)
         offset_vox_x = mask_x//2 + int(vox_xmin)
         gaussian_mask = _gaussian_mask[offset_vox_z:offset_vox_z+vox_z, offset_vox_x:offset_vox_x+vox_x]
-        # gaussian_mask_np = (gaussian_mask*255).astype(np.uint8)
-        # cv2.imwrite("gaussian_mask.png", gaussian_mask_np)
-        # exit(-1)
         return torch.from_numpy(gaussian_mask[None,None,:,:]).float()
 
     def prepare_forward(self, cameras_image, cameras_extrin, cameras_intrin):
@@ -182,7 +180,13 @@ class YOLOXOCC(nn.Module):
 
         # 将lidar点云合并到voxel坐标系
         lidars_points_ref = lidars_points_ref_.reshape(B, -1, 3)
-        radius = basic.gaussian_radius((self.vox.vox_z_size,self.vox.vox_x_size), stride=8)
+        # 平均目标直径
+        target_world_diameter = (self.dimentions.mean(0)[0]**2 + self.dimentions.mean(0)[1]**2)**0.5
+        vox_per_world = (self.vox.vox_x_size/(self.vox.world_xmax-self.vox.world_xmin), \
+                            self.vox.vox_z_size/(self.vox.world_zmax-self.vox.world_zmin))
+        target_vox_diameter = (target_world_diameter*vox_per_world[0], 
+                                target_world_diameter*vox_per_world[1])
+        radius = basic.gaussian_radius(target_vox_diameter)
         occ_centermask_target = self.vox.occ_centermask(lidars_points_ref, radius=radius) # B, Y, Z, X
 
         self.prepare_forward(cameras_image, cameras_extrin, cameras_intrin)
@@ -249,8 +253,7 @@ class YOLOXOCC(nn.Module):
 
         else:
             outputs = {}
-            with torch.no_grad():
-                occ_metrics = self.occ_head.get_metrics(occ_pred, occ_centermask_target, valid_vox_mask)
+            occ_metrics = self.occ_head.get_metrics(occ_pred, occ_centermask_target, valid_vox_mask)
             
             for key in occ_metrics:
                 new_key = "occ_" + key
@@ -279,9 +282,9 @@ class YOLOXOCC(nn.Module):
         occ = self.occ_head(datas)
         
         if temporal_feature is not None:
-            return occ.sigmoid(), datas["temporal_feature"]
+            return occ, datas["temporal_feature"]
         else:
-            return occ.sigmoid()
+            return occ
     
     def prepare_export_images(self, cameras_image_0, cameras_image_1, cameras_image_2, cameras_extrin, cameras_intrin, perspective_mode="gridsample"):
         self.forward = self.forward_export_images

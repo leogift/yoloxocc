@@ -97,9 +97,8 @@ class Trainer:
         for _ in range(self.exp.grad_accum):
             data_start_time = time.time()
 
-            _targets = self.prefetcher.next()
             targets = []
-            for target in _targets:
+            for target in self.prefetcher.next():
                 target = target.type(self.data_type)
                 target.requires_grad = False
                 targets.append(target)
@@ -192,7 +191,7 @@ class Trainer:
             self.tblogger = SummaryWriter(os.path.join(self.file_name, "tensorboard"))
 
         logger.info("Training start...")
-        logger.info("\n{}".format(model))
+        logger.info("\n{}".format(self.model))
 
     def after_train(self):
         logger.info(

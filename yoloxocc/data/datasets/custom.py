@@ -24,18 +24,20 @@ single dict file format:
             "instances": [
                 {
                     "location": [0, 1, 2],
-                    "rotation": 3,
+                    "yaw": 3,
                     "dimensions": [4, 5, 6],
                     "category": "car"
                 },
                 {
                     "location": [4, 5, 6],
-                    "rotation": 7,
+                    "yaw": 7,
                     "dimensions": [8, 9, 10],
                     "category": "pedestrian"
                 }
             ],
-            "extrinsics": [0, 1, 0, 0, 0, 0, 1, -1355, 1, 0, 0, 0]
+            "extrinsics": [0, 1, 0, 0, \
+                            0, 0, 1, -1355, \
+                            1, 0, 0, 0]
         }
     },
     "cameras":{
@@ -216,8 +218,8 @@ class CustomDataset(DatasetBase):
                 category_id = self.category_list.index(category)
                 dimensions = instance["dimensions"]
                 location = instance["location"]
-                rotation = instance["rotation"]
-                annos.append(np.array([*location, *dimensions, rotation, category_id]))
+                yaw = instance["yaw"]
+                annos.append(np.array([*location, *dimensions, yaw, category_id]))
 
             annos = np.stack(annos) if len(annos) > 0 else np.ones((0, 8))*(-1)
             lidars_annos_list.append(annos)

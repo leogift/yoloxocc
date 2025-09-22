@@ -96,20 +96,24 @@ def bboxes_iou(bboxes_a, bboxes_b, xyxy=True):
         area_a = torch.prod(bboxes_a[:, 2:], 1)
         area_b = torch.prod(bboxes_b[:, 2:], 1)
 
+    area_i = torch.prod(inter_br - inter_tl, 2)  # * ((tl < br).all())
+    iou = area_i / (area_a[:, None] + area_b - area_i).clamp(1e-7)
+    
     en = (inter_tl < inter_br).type(inter_tl.type()).prod(dim=2)
 
-    area_i = torch.prod(inter_br - inter_tl, 2) * en  # * ((tl < br).all())
-    iou = area_i / (area_a[:, None] + area_b - area_i).clamp(1e-7)
-    return iou
+    return iou * en
 
 
 def ray_iou(bboxes_a, bboxes_b, \
-        center, angle_threshold=15, \
+        classes_radius, center, angle_threshold=45, \
         xyxy=True
     ):
     if bboxes_a.shape[1] != 4 or bboxes_b.shape[1] != 4:
         raise IndexError
     
+    # iou
+    iou = bboxes_iou(bboxes_a, bboxes_b, xyxy)
+
     if xyxy:
         outer_tl = torch.min(bboxes_a[:, None, :2], bboxes_b[:, :2])
         outer_br = torch.max(bboxes_a[:, None, 2:], bboxes_b[:, 2:])
@@ -130,22 +134,23 @@ def ray_iou(bboxes_a, bboxes_b, \
         bboxes_a_center = bboxes_a[:, :2]
         bboxes_b_center = bboxes_b[:, :2]
 
-    # 计算bbox中心到圆心的角度
+    # diou
+    bboxes_center_dist = torch.norm(bboxes_a - bboxes_b, dim=2)
+    bboxes_outer_dist = torch.norm(outer_tl - outer_br, dim=2)
+    diou = iou - bboxes_center_dist / bboxes_outer_dist.clamp(1e-7)
+
+    # radius enable
+    en_radius = (bboxes_center_dist > classes_radius).type(bboxes_a.type())
+
+    # ray enable
     bboxes_a_trans = bboxes_a_center - center
     bboxes_a_angle = torch.atan2(bboxes_a_trans[:, :, 1], bboxes_a_trans[:, :, 0])
     bboxes_b_trans = bboxes_b_center - center
     bboxes_b_angle = torch.atan2(bboxes_b_trans[:, :, 1], bboxes_b_trans[:, :, 0])
-
-    # diou
-    bboxes_center_dist = torch.norm(bboxes_a - bboxes_b, dim=2)
-    bboxes_outer_dist = torch.norm(outer_tl - outer_br, dim=2)
-    diou = bboxes_center_dist * en / bboxes_outer_dist.clamp(1e-7)
-
-    # 射线角nms
-    bboxes_angle = torch.abs(bboxes_a_angle - bboxes_b_angle) % np.pi
-    en = (bboxes_angle < angle_threshold).type(bboxes_a.type())
-
-    return diou * en
+    bboxes_angle = torch.abs(bboxes_a_angle - bboxes_b_angle) % np.pi / np.pi * 180
+    en_ray = (bboxes_angle < angle_threshold).type(bboxes_a.type())
+    
+    return diou * en_radius * en_ray
 
 
 def matrix_iou(a, b):

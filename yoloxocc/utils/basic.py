@@ -57,13 +57,13 @@ def cloudgrid3d(B, X, Y, Z):
     # this is B x N x 3
     return xyz
 
-def gaussian_radius(feature_size, min_overlap=0.985, stride=32):
-    height, width = feature_size
+def gaussian_radius(target_size, min_overlap=0.7):
+    height, width = target_size
     a1 = 1
     b1 = (height + width)
     c1 = width * height * (1 - min_overlap) / (1 + min_overlap)
     sq1 = math.sqrt(b1 ** 2 - 4 * a1 * c1)
-    r1 = (b1 + sq1) / 2
+    r1 = (b1 + sq1) / (2 * a1)
     a2 = 4
     b2 = 2 * (height + width)
     c2 = (1 - min_overlap) * width * height
@@ -74,7 +74,7 @@ def gaussian_radius(feature_size, min_overlap=0.985, stride=32):
     c3 = (min_overlap - 1) * width * height
     sq3 = math.sqrt(b3 ** 2 - 4 * a3 * c3)
     r3 = (b3 + sq3) / 2
-    return min(r1, r2, r3) * stride / 32 + 0.5
+    return max(0.5, min(r1, r2, r3))
 
 def special_multiples(input_num, base_num=8):
     multiples = math.ceil(input_num / base_num)

@@ -6,12 +6,11 @@ import os
 
 from yoloxocc.exp import Exp as BaseExp
 
-from exps.yoloxocc_regnet_x_400mf_w16x2x12_v64x4x48_ipm import Exp as BaseExp
+from exps.yoloxocc_regnet_x_400mf_w12x2x16_v48x4x64_ipm import Exp as BaseExp
 
 class Exp(BaseExp):
     def __init__(self):
         super(Exp, self).__init__()
         self.exp_name = os.path.split(os.path.realpath(__file__))[1].split(".")[0]
-        self.train_json = "train_tank.json"
+        self.train_json = "val_tank.json"
         self.val_json = "val_tank.json"
-

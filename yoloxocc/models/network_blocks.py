@@ -67,6 +67,38 @@ class BaseConv(nn.Module):
         return self.act(self.conv(x))
 
 
+class SeparableConv(nn.Module):
+    """A DWConv2d -> Batchnorm -> silu/relu
+      -> PWConv2d -> Batchnorm block"""
+
+    def __init__(
+        self, 
+        in_channels, 
+        out_channels, 
+        ksize, 
+        stride=1, 
+        act="silu"
+    ):
+        super().__init__()
+        
+        self.dwconv = BaseConv(
+            in_channels, 
+            in_channels, 
+            ksize, 
+            stride=stride, 
+            groups=in_channels, 
+            act=act
+        )
+
+        self.pwconv = BaseConv(in_channels, out_channels, 1, stride=1, act="")
+
+    def forward(self, x):
+        y = self.dwconv(x)
+        y = self.pwconv(x)
+
+        return y
+        
+
 class Bottleneck(nn.Module):
     """Standard bottleneck"""
     def __init__(
@@ -95,7 +127,7 @@ class Bottleneck(nn.Module):
         return self.act(y)
 
 
-class RepSConv(nn.Module):
+class RepSConv3x3(nn.Module):
     # Rep Conv
     def __init__(
         self,
@@ -206,7 +238,7 @@ class RepBottleneck(nn.Module):
         super().__init__()
         hidden_channels = special_multiples(out_channels * expansion)
 
-        self.conv1 = RepSConv(in_channels, hidden_channels, act=act)
+        self.conv1 = RepSConv3x3(in_channels, hidden_channels, act=act)
         self.conv2 = BaseConv(hidden_channels, out_channels, 1, stride=1, act="")
 
         self.use_add = in_channels == out_channels
@@ -227,7 +259,7 @@ class C2aLayer(nn.Module):
     def __init__(self,
         in_channels,
         out_channels=None,
-        n=1,
+        n=2,
         act="silu",
         drop_rate=0.,
         use_rep=True,
@@ -277,7 +309,7 @@ class C2PPLayer(nn.Module):
     def __init__(self, 
         in_channels,
         out_channels, 
-        n=1,
+        n=2,
         act="silu",
         drop_rate=0.,
     ):
@@ -325,8 +357,8 @@ class STNLayer(nn.Module):
     ):
         super().__init__()
         self.linear = nn.Linear(H*W, H*W, bias=True)
-        self.linear.weight.data = torch.eye(H*W).view(H*W, H*W).requires_grad_(True)
-        self.linear.bias.data = torch.zeros(H*W).requires_grad_(True)
+        self.linear.weight.data = nn.Parameter(torch.eye(H*W).view(H*W, H*W), requires_grad=True)
+        self.linear.bias.data = nn.Parameter(torch.zeros(H*W), requires_grad=True)
         self.linear.requires_grad_(True)
 
         self.act = get_activation(act)()

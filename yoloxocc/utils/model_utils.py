@@ -100,7 +100,7 @@ def optimize_model(model: nn.Module) -> nn.Module:
     Returns:
         nn.Module: Optimized model
     """
-    from yoloxocc.models.network_blocks import BaseConv, RepSConv, RepBottleneck
+    from yoloxocc.models.network_blocks import BaseConv, RepSConv3x3, RepBottleneck
 
     for m in model.modules():
         if type(m) is BaseConv and hasattr(m, "bn"):
@@ -109,7 +109,7 @@ def optimize_model(model: nn.Module) -> nn.Module:
             m.forward = m.fuseforward  # update forward
 
     for m in model.modules():
-        if type(m) in [RepSConv] and not hasattr(m, "RepSConv"):
+        if type(m) in [RepSConv3x3] and not hasattr(m, "RepSConv3x3"):
             m.switch_to_deploy()
             m.forward = m.fuseforward  # update forward
 

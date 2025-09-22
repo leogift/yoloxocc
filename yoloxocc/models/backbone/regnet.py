@@ -15,7 +15,6 @@ class Regnet(nn.Module):
     def __init__(
         self,
         model="regnet_x_800mf",
-        out_features=["backbone3", "backbone4", "backbone5"],
         act="silu",
         pp_repeats=0,
         drop_rate=0.,

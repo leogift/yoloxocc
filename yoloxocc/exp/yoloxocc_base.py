@@ -10,11 +10,9 @@ import torch.nn as nn
 
 from .base_exp import BaseExp
 
-
 class Exp(BaseExp):
     def __init__(self):
         super().__init__()
-
         # ---------------- model config ---------------- #
         # activation name. For example, if using "relu", then "silu" will be replaced to "relu".
         self.act = "silu"
@@ -62,12 +60,12 @@ class Exp(BaseExp):
         # epoch number used for warmup
         self.warmup_epochs = 10
         # max training epoch
-        self.max_epoch = 240
+        self.max_epoch = 120
         # minimum learning rate during warmup
         self.warmup_lr = 1e-6
         self.min_lr_ratio = 0.01
         # learning rate for one image. During training, lr will multiply batchsize.
-        self.basic_lr_per_img = 4e-3 / 64.0 # SGD: 0.04 / 64.0, Adam: 0.004 / 64.0
+        self.basic_lr_per_img = 1e-3 / 64.0 # SGD: 0.01 / 64.0, Adam: 0.001 / 64.0
         # name of LRScheduler
         self.scheduler = "warmcos"
         # last #epoch to close augmention like mosaic
@@ -174,11 +172,11 @@ class Exp(BaseExp):
                         g[1].append(p)
                     else:
                         g[0].append(p)  # weight (with decay)
-
+            
             if self.opt_name == "Adam":
-                optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.999))  # adjust beta1 to momentum
+                optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.995))  # adjust beta1 to momentum
             elif self.opt_name == "AdamW":
-                optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(self.momentum, 0.999), amsgrad=True)
+                optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(self.momentum, 0.995), amsgrad=True)
             elif self.opt_name == "SGD":
                 optimizer = torch.optim.SGD(g[2], lr=lr, momentum=self.momentum, nesterov=True)
             else:
