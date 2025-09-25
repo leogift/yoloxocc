@@ -91,10 +91,10 @@ class SeparableConv(nn.Module):
         )
 
         self.pwconv = BaseConv(in_channels, out_channels, 1, stride=1, act="")
-
+        
     def forward(self, x):
         y = self.dwconv(x)
-        y = self.pwconv(x)
+        y = self.pwconv(y)
 
         return y
         
@@ -276,6 +276,7 @@ class C2aLayer(nn.Module):
         self.hidden_channels = special_multiples(out_channels//2)
         
         self.cv1 = BaseConv(in_channels, 2 * self.hidden_channels, 1, stride=1, act=act)
+        
         self.m = nn.ModuleList(
             RepBottleneck(
                 self.hidden_channels, self.hidden_channels, act=act, 
@@ -286,6 +287,7 @@ class C2aLayer(nn.Module):
             )
             for _n in range(n)
         )
+        
         self.cv2 = BaseConv(2 * self.hidden_channels, out_channels, 1, stride=1, act=act)
         self.droppath = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
 
@@ -308,7 +310,7 @@ class C2PPLayer(nn.Module):
     """Pyramid Pooling and Squeeze Excitation"""
     def __init__(self, 
         in_channels,
-        out_channels, 
+        out_channels=None, 
         n=2,
         act="silu",
         drop_rate=0.,
@@ -319,9 +321,10 @@ class C2PPLayer(nn.Module):
         self.hidden_channels = special_multiples(out_channels//2)
         
         self.cv1 = BaseConv(in_channels, 2 * self.hidden_channels, 1, stride=1, act=act)
-        self.pp = nn.ModuleList()
+        
+        self.m = nn.ModuleList()
         for idx in range(3):
-            self.pp.append(
+            self.m.append(
                 nn.Sequential(
                     *[
                         nn.MaxPool2d(3, stride=1, padding=1)
@@ -329,6 +332,7 @@ class C2PPLayer(nn.Module):
                     ],
                 )
             )
+        
         self.cv2 = BaseConv(2 * self.hidden_channels, out_channels, 1, stride=1, act=act)
         self.droppath = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
 
@@ -336,10 +340,10 @@ class C2PPLayer(nn.Module):
         x = self.cv1(x)
         x_1, x_2 = x.split((self.hidden_channels, self.hidden_channels), 1)
 
-        x_m = x_2
+        x_m = None
         for idx in range(3):
-            x_2 = self.pp[idx](x_2)
-            x_m = x_m + x_2
+            x_2 = self.m[idx](x_2)
+            x_m = x_2 if x_m is None else x_m + x_2
         x_2 = x_m
 
         if self.training:
@@ -350,22 +354,63 @@ class C2PPLayer(nn.Module):
         return self.cv2(y)
 
 
-class STNLayer(nn.Module):
+class C2MLPLayer(nn.Module):
+    """
+    MLP layer
+    """
     def __init__(self,
-        H, W,
+        in_channels,
+        out_channels=None, 
+        H=16, W=16,
+        expansion=2,
         act="silu",
+        drop_rate=0.,
     ):
         super().__init__()
-        self.linear = nn.Linear(H*W, H*W, bias=True)
-        self.linear.weight.data = nn.Parameter(torch.eye(H*W).view(H*W, H*W), requires_grad=True)
-        self.linear.bias.data = nn.Parameter(torch.zeros(H*W), requires_grad=True)
-        self.linear.requires_grad_(True)
+        if out_channels is None:
+            out_channels = in_channels
+        self.hidden_channels = special_multiples(out_channels//2)
+        
+        self.cv1 = BaseConv(in_channels, 2 * self.hidden_channels, 1, stride=1, act=act)
+        
+        hidden_dims = special_multiples(H*W * expansion)
+
+        self.linear1 = nn.Linear(H*W, hidden_dims, bias=True)
+        self.linear1.weight.data = nn.Parameter(
+            torch.cat([torch.eye(H*W), torch.zeros([hidden_dims-H*W, H*W])], dim=0),
+            requires_grad=True
+        )
+        self.linear1.bias.data = nn.Parameter(torch.zeros(hidden_dims), requires_grad=True)
+        self.linear1.requires_grad_(True)
 
         self.act = get_activation(act)()
+        
+        self.linear2 = nn.Linear(hidden_dims, H*W, bias=True)
+        self.linear2.weight.data = nn.Parameter(
+            torch.cat([torch.eye(H*W), torch.zeros([H*W, hidden_dims-H*W])], dim=1),
+            requires_grad=True
+        )
+        self.linear2.bias.data = nn.Parameter(torch.zeros(H*W), requires_grad=True)
+        self.linear2.requires_grad_(True)
+
+        self.cv2 = BaseConv(2 * self.hidden_channels, out_channels, 1, stride=1, act=act)
+        self.droppath = DropPath(drop_rate) if drop_rate > 0. else nn.Identity()
 
     def forward(self, x):
-        B, C, H, W = x.shape
-        y = x.view(B, C, -1)
-        y = self.linear(y)
-        y = y.view(B, C, H, W)
-        return self.act(y)
+        x = self.cv1(x)
+        x_1, x_2 = x.split((self.hidden_channels, self.hidden_channels), 1)
+
+        B, C, H, W = x_2.shape
+        x_m = x_2.view(B, C, -1)
+        x_m = self.linear1(x_m)
+        x_m = self.act(x_m)
+        x_m = self.linear2(x_m)
+        x_2 = x_m.view(B, C, H, W)
+
+        if self.training:
+            y = torch.cat((self.droppath(x_1), x_2), dim=1)
+        else:
+            y = torch.cat((x_1, x_2), dim=1)
+
+        return self.cv2(y)
+

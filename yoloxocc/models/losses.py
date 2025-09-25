@@ -36,7 +36,7 @@ class DiceLoss(nn.Module):
 
         target = target.type_as(pred)
 
-        loss = 1 - 2 * (pred * target).sum() / (pred + target).sum().clamp(1e-7)
+        loss = 1 - 2 * (pred * target * mask).sum() / ((pred + target) * mask).sum().clamp(1e-7)
 
         return loss
 
@@ -77,45 +77,27 @@ class HeatmapLoss(nn.Module):
                 
         return loss / C
 
-# gaussian focal loss
-class GaussianFocalLoss(nn.Module):
-    def __init__(self, alpha=2.0, gamma=4.0):
+# gaussian l1 loss
+class GaussianL1Loss(nn.Module):
+    def __init__(self, reduction="none"):
         super().__init__()
-        self.alpha = alpha
-        self.gamma = gamma
+        assert reduction in [ None, 'none', 'mean', 'sum']
+        self.reduction = reduction
 
-    def gaussian_focal_loss(self, pred, target, mask=None):
-        # should not use mean as other losses
-        pos_pos = target.ge(1 - 1/torch.e)
-        neg_pos = target.lt(1 - 1/torch.e)
-        neg_weights = (1 - target).pow(self.gamma)
-        pos_loss = (
-            - (pred + 1e-7).log()
-            * (1 - pred).pow(self.alpha)
-            * pos_pos
-        )
-        neg_loss = (
-            -(1 - pred + 1e-7).log()
-            * pred.pow(self.alpha)
-            * neg_weights
-            * neg_pos
-        )
-        nums_pos = (pos_pos.float()*mask).sum()
-        pos_loss = (pos_loss*mask).sum()
-        neg_loss = (neg_loss*mask).sum()
-        loss = neg_loss if nums_pos == 0 else (pos_loss + neg_loss) / nums_pos
-        return loss
-
-    def forward(self, pred, target, mask=None):
+    def forward(self, pred, target):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
 
         target = target.type_as(pred)
-        if mask is None:
-            mask = torch.ones_like(pred)
-        mask = mask.type_as(pred)
 
-        loss = self.gaussian_focal_loss(pred, target, mask)
+        l1 = torch.abs(pred - target)
+        loss = - (1 - l1 + 1e-7).log() * l1
+
+        if self.reduction == "mean":
+            loss = loss.mean()
+        elif self.reduction == "sum":
+            loss = loss.sum()
+        
         return loss
 
 # balance loss

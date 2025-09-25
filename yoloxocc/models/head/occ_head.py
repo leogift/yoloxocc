@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from yoloxocc.models.network_blocks import get_activation, BaseConv, SeparableConv
 from yoloxocc.utils import special_multiples, initialize_regression_weights
 
-from yoloxocc.models.losses import MaskedBCEWithLogitsLoss, DiceLoss, HeatmapLoss, GaussianFocalLoss, UncertaintyLoss
+from yoloxocc.models.losses import MaskedBCEWithLogitsLoss, DiceLoss, HeatmapLoss, GaussianL1Loss, BalanceLoss, UncertaintyLoss
 from yoloxocc.models.metrics import HeatmapMetric, SimilarityMetric, IOUMetric
 
 class OCCHead(nn.Module):
@@ -83,12 +83,12 @@ class OCCHead(nn.Module):
 
         # loss functions
         self.bce_loss = HeatmapLoss(MaskedBCEWithLogitsLoss())
-        self.dice_loss = HeatmapLoss(DiceLoss())
-        self.center_loss = HeatmapLoss(GaussianFocalLoss())
+        self.dice_loss = DiceLoss()
+        self.center_loss = BalanceLoss(loss_fn=GaussianL1Loss(reduction="none"))
         # uncertainty loss
         if not self.aux_head:
             self.bce_uncertainty_loss = UncertaintyLoss(factor=2.0)
-            self.dice_uncertainty_loss = UncertaintyLoss(factor=2.0)
+            self.dice_uncertainty_loss = UncertaintyLoss(factor=1.0)
             self.center_uncertainty_loss = UncertaintyLoss(factor=1.0)
 		
 		# metric
@@ -136,8 +136,8 @@ class OCCHead(nn.Module):
         # losses
         with torch.cuda.amp.autocast(enabled=False):
             bce_loss = self.bce_loss(_pred, _target.round(), mask=_valid_mask, channel_weight=self.vox_y_weight)
-            dice_loss = self.dice_loss(_pred.sigmoid().round(), _target.round(), mask=_valid_mask, channel_weight=self.vox_y_weight)
-            center_loss  = self.center_loss(_pred.sigmoid(), _target, mask=_valid_mask, channel_weight=self.vox_y_weight)
+            dice_loss = self.dice_loss(_pred.sigmoid().round(), _target.round(), mask=_valid_mask)
+            center_loss  = self.center_loss(_pred.sigmoid(), _target, mask=_valid_mask)
 
             if uncertainty:
                 bce_loss = self.bce_uncertainty_loss(bce_loss)

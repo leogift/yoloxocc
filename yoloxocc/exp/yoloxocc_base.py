@@ -174,9 +174,9 @@ class Exp(BaseExp):
                         g[0].append(p)  # weight (with decay)
             
             if self.opt_name == "Adam":
-                optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.995))  # adjust beta1 to momentum
+                optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.996))  # adjust beta1 to momentum
             elif self.opt_name == "AdamW":
-                optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(self.momentum, 0.995), amsgrad=True)
+                optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(self.momentum, 0.996), amsgrad=True)
             elif self.opt_name == "SGD":
                 optimizer = torch.optim.SGD(g[2], lr=lr, momentum=self.momentum, nesterov=True)
             else:

@@ -29,11 +29,14 @@ class IOUMetric(nn.Module):
             f"expect {pred.shape} == {target.shape}"
 
         target = target.type_as(pred)
+        if mask is None:
+            mask = torch.ones_like(pred)
+        mask = mask.type_as(pred)
 
         intersection = pred * target
         union = (pred + target) - intersection
 
-        metric = intersection.sum() / union.sum().clamp(1e-7)
+        metric = (intersection * mask).sum() / (union * mask).sum().clamp(1e-7)
 
         return metric
 

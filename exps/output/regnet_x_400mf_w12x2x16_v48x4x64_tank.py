@@ -6,7 +6,7 @@ import os
 
 from yoloxocc.exp import Exp as BaseExp
 
-from exps.yoloxocc_regnet_x_400mf_w12x2x16_v48x4x64_ipm import Exp as BaseExp
+from exps.regnet_x_400mf_w12x2x16_v48x4x64 import Exp as BaseExp
 
 class Exp(BaseExp):
     def __init__(self):

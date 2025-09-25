@@ -226,18 +226,11 @@ class Trainer:
             self.train_loader.batch_sampler.disable_aug()
 
         elif self.epoch + 1 > self.max_epoch - self.exp.no_aug_epochs:
-            if self.exp.only_train_head:
-                logger.info("--->Freeze all!")
-                freeze_module(compat_model.backbone)
-                freeze_module(compat_model.neck)
-                freeze_module(compat_model.transform)
-                freeze_module(compat_model.bev_neck)
-            else:
-                logger.info("--->Unfreeze all!")
-                unfreeze_module(compat_model.backbone)
-                unfreeze_module(compat_model.neck)
-                unfreeze_module(compat_model.transform)
-                unfreeze_module(compat_model.bev_neck)
+            logger.info("--->Freeze all!")
+            freeze_module(compat_model.backbone)
+            freeze_module(compat_model.neck)
+            freeze_module(compat_model.transform)
+            freeze_module(compat_model.bev_neck)
 
             logger.info("--->No aug now!")
             if compat_model.bev_augment is not None:

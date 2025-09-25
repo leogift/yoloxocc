@@ -10,7 +10,7 @@ from loguru import logger
 
 from yoloxocc.utils.checkpoint import get_missing_parameters_message, get_unexpected_parameters_message
 
-_CKPT_FULL_PATH = "pretrain/yoloxocc_regnet_x_3_2gf_y4_ipm.pth"
+_CKPT_FULL_PATH = "pretrain/yoloxocc_regnet_x_400mf_y4.pth"
 
 class Exp(BaseExp):
     def __init__(self):
@@ -39,14 +39,14 @@ class Exp(BaseExp):
         ]
 
         self.act = "relu"
-        self.max_epoch = 120
+        self.max_epoch = 30
 
-        self.model_name = "regnet_x_3_2gf"
+        self.model_name = "regnet_x_400mf"
         self.bev_model_name = "resnet18"
 
-        self.warmup_epochs = 10
+        self.warmup_epochs = 5
         self.no_aug_epochs = 10
-        self.data_num_workers = 4
+        self.data_num_workers = 2
         self.eval_epoch_interval = 5
 
 
@@ -75,21 +75,17 @@ class Exp(BaseExp):
                 out_features=("fpn3", "fpn4", "fpn5"),
                 channels=channels,
                 act=self.act,
-                n=2,
-                simple_reshape=False
+                n=1,
+                simple_reshape=True
             )
 
-            bev_pp_repeats = 0 if min(self.vox_xyz_size[0], self.vox_xyz_size[2])//8 < 7 \
-                else (min(self.vox_xyz_size[0], self.vox_xyz_size[2])//8 - 7)//6 + 1
             bev_backbone = BEVResnet(
                 self.bev_model_name,
                 in_features=["bev_trans3", "bev_trans4", "bev_trans5"],
                 out_features=["bev_backbone3", "bev_backbone4", "bev_backbone5"],
                 act=self.act,
-                n=2,
-                pp_repeats=bev_pp_repeats,
+                n=1,
                 drop_rate=0.1,
-                use_stn=True,
                 vox_xyz_size=self.vox_xyz_size,
             )
             bev_channels = bev_backbone.channels[:3]
@@ -100,7 +96,7 @@ class Exp(BaseExp):
                 out_features=["bev_trans3", "bev_trans4", "bev_trans5"],
                 out_channels=bev_channels,
                 act=self.act, 
-                n=2,
+                n=1,
                 vox_xyz_size=self.vox_xyz_size,
                 world_xyz_bounds=self.world_xyz_bounds,
             )
@@ -116,8 +112,8 @@ class Exp(BaseExp):
                     out_features=["bev_fpn3", "bev_fpn4", "bev_fpn5"],
                     channels=bev_channels,
                     act=self.act, 
-                    n=2,
-                    simple_reshape=False
+                    n=1,
+                    simple_reshape=True
                 ),
             ])
             
@@ -128,7 +124,7 @@ class Exp(BaseExp):
                 n=1,
                 vox_y=self.vox_xyz_size[1],
                 vox_y_weight=self.vox_y_weight,
-                simple_reshape=False
+                simple_reshape=True
             )
             aux_occ_head_list = [
                 OCCHead(

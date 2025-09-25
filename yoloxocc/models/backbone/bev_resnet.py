@@ -4,7 +4,7 @@
 import torch
 from torch import nn
 
-from yoloxocc.models.network_blocks import C2aLayer, C2PPLayer, STNLayer
+from yoloxocc.models.network_blocks import C2aLayer, C2PPLayer, C2MLPLayer
 
 import ssl
 context = ssl._create_unverified_context()
@@ -19,9 +19,7 @@ class BEVResnet(nn.Module):
         out_features=["bev_pan_s2", "bev_pan_s4", "bev_pan_s8"],
         act="silu",
         n=2,
-        pp_repeats=0,
         drop_rate=0.,
-        use_stn=False,
         vox_xyz_size=[128, 4, 128],
     ):
         super().__init__()
@@ -73,29 +71,15 @@ class BEVResnet(nn.Module):
 
         self.drop   = nn.Dropout(drop_rate) if drop_rate > 0. else nn.Identity()
 
-        # last_layer
-        self.last_layer = nn.Identity() if pp_repeats==0 else C2PPLayer(
+        # mlp
+        self.mlp = C2MLPLayer(
             self.channels[2],
-            self.channels[2],
-            n=pp_repeats,
-            act=act,
-            drop_rate=drop_rate,
-        )
-
-        # stn
-        if use_stn:
-            self.stn = STNLayer(vox_xyz_size[0]//8, vox_xyz_size[2]//8, act=act)
-        else:
-            self.stn = nn.Identity()
+            H=vox_xyz_size[2]//8, 
+            W=vox_xyz_size[0]//8, 
+            act=act)
 
 
     def forward(self, inputs):
-        """
-        Args:
-            inputs: backbone output.
-        Returns:
-            Tuple[Tensor]: FPN feature.
-        """
         features = [inputs[f] for f in self.in_features]
         [x1, x2, x3] = features
         outputs = inputs
@@ -115,8 +99,7 @@ class BEVResnet(nn.Module):
         x = self.csp3(x)
         if self.training:
             x = self.drop(x)
-        x = self.last_layer(x)
-        x = self.stn(x)
+        x = self.mlp(x)
         outputs[self.out_features[2]] = x # s32
 
         return outputs
