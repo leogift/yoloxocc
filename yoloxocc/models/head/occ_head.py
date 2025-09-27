@@ -134,7 +134,7 @@ class OCCHead(nn.Module):
         _pred = preds
 
         # losses
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda', enabled=False):
             bce_loss = self.bce_loss(_pred, _target.round(), mask=_valid_mask, channel_weight=self.vox_y_weight)
             dice_loss = self.dice_loss(_pred.sigmoid().round(), _target.round(), mask=_valid_mask)
             center_loss  = self.center_loss(_pred.sigmoid(), _target, mask=_valid_mask)
@@ -175,7 +175,7 @@ class OCCHead(nn.Module):
         _valid_mask = F.interpolate(valid_mask, (Zp,Xp), mode="nearest")
         _pred = preds
 
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast("cuda", enabled=False):
             similarity = self.similarity_metric(_pred, _target, _valid_mask, debug=True)
             iou = self.iou_metric(_pred.round(), _target.round(), _valid_mask)
 

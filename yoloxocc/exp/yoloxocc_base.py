@@ -5,7 +5,6 @@
 import os
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 
 from .base_exp import BaseExp
@@ -75,7 +74,7 @@ class Exp(BaseExp):
         # apply EMA during training
         self.ema = True
         # Optimizer name
-        self.opt_name = "AdamW"
+        self.opt_name = "NAdam"
         # weight decay of optimizer
         self.weight_decay = 5e-4
         # momentum of optimizer
@@ -110,6 +109,7 @@ class Exp(BaseExp):
         from yoloxocc.utils import (
             wait_for_the_master,
             get_rank,
+            get_world_size
         )
 
         rank = get_rank()
@@ -132,7 +132,7 @@ class Exp(BaseExp):
 
         batch_size = batch_size // self.grad_accum
         if is_distributed:
-            batch_size = batch_size // dist.get_world_size()
+            batch_size = batch_size // get_world_size()
 
         sampler = InfiniteSampler(len(traindataset))
 
@@ -155,7 +155,8 @@ class Exp(BaseExp):
         return train_loader
 
 
-    def get_optimizer(self, batch_size):
+    def get_optimizers(self, batch_size):
+        from yoloxocc.utils import Muon
         if "optimizer" not in self.__dict__:
             if self.warmup_epochs > 0:
                 lr = self.warmup_lr
@@ -163,13 +164,19 @@ class Exp(BaseExp):
                 lr = self.basic_lr_per_img * batch_size
 
             g = [], [], []  # optimizer parameter groups
+            muon_params = []
             norm = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
             for v in self.model.modules():
                 for p_name, p in v.named_parameters(recurse=0):
-                    if "bias" in p_name:
+                    if not p.requires_grad:
+                        continue
+
+                    if "bias" in p_name: # bias
                         g[2].append(p)
-                    elif p_name == "weight" and isinstance(v, norm):  # weight (no decay)
+                    elif p_name == "weight" and isinstance(v, norm):  # norm (no decay)
                         g[1].append(p)
+                    elif len(p.shape) == 4: # weight (muon)
+                        muon_params.append(p)
                     else:
                         g[0].append(p)  # weight (with decay)
             
@@ -177,6 +184,8 @@ class Exp(BaseExp):
                 optimizer = torch.optim.Adam(g[2], lr=lr, betas=(self.momentum, 0.996))  # adjust beta1 to momentum
             elif self.opt_name == "AdamW":
                 optimizer = torch.optim.AdamW(g[2], lr=lr, betas=(self.momentum, 0.996), amsgrad=True)
+            elif self.opt_name == "NAdam":
+                optimizer = torch.optim.NAdam(g[2], lr=lr, betas=(self.momentum, 0.996), decoupled_weight_decay=True)
             elif self.opt_name == "SGD":
                 optimizer = torch.optim.SGD(g[2], lr=lr, momentum=self.momentum, nesterov=True)
             else:
@@ -185,9 +194,11 @@ class Exp(BaseExp):
             optimizer.add_param_group({"params": g[0], "weight_decay": self.weight_decay})  # add g0 with weight_decay
             optimizer.add_param_group({"params": g[1], "weight_decay": 0.0})  # add g1 (BatchNorm2d weights)
 
-            self.optimizer = optimizer
+            optimizer_muon = Muon(muon_params, lr=lr * 10, weight_decay=self.weight_decay, momentum=self.momentum, nesterov=True)
 
-        return self.optimizer
+            self.optimizers = [optimizer, optimizer_muon]
+
+        return self.optimizers
 
     def get_lr_scheduler(self, lr, iters_per_epoch):
         from yoloxocc.utils import LRScheduler
@@ -221,7 +232,7 @@ class Exp(BaseExp):
         )
         batch_size = batch_size // self.grad_accum
         if is_distributed:
-            batch_size = batch_size // dist.get_world_size()
+            batch_size = batch_size // get_world_size()
         sampler = torch.utils.data.SequentialSampler(valdataset)
 
         dataloader_kwargs = {

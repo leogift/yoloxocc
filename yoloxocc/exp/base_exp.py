@@ -33,7 +33,7 @@ class BaseExp(metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def get_optimizer(self, batch_size: int) -> torch.optim.Optimizer:
+    def get_optimizers(self, batch_size: int):
         pass
 
     @abstractmethod

@@ -165,15 +165,9 @@ class YOLOXOCC(nn.Module):
 
         return datas
 
-    def forward_trainval(self, cameras_image, cameras_extrin, cameras_intrin,
-            lidars_points, lidars_extrin,
-            cameras_annos=None, lidars_annos=None
-        ):
-        # 准备centermask的GT    
-        assert lidars_points is not None \
-            and lidars_extrin is not None, "lidars_points and lidars_extrin must be provided for training"
+    # 生成点云目标
+    def make_occ_targets(self, B, lidars_points, lidars_extrin):
         # 点云聚合
-        B, S, C, H, W = cameras_image.shape
         lidars_points_ = basic.pack_seqdim(lidars_points, B)
         lidars_extrin_ = basic.pack_seqdim(lidars_extrin, B)
         lidars_points_ref_ = geom.apply_4x4(lidars_extrin_, lidars_points_)
@@ -187,7 +181,19 @@ class YOLOXOCC(nn.Module):
         target_vox_diameter = (target_world_diameter*vox_per_world[0], 
                                 target_world_diameter*vox_per_world[1])
         radius = basic.gaussian_radius(target_vox_diameter)
-        occ_centermask_target = self.vox.occ_centermask(lidars_points_ref, radius=radius) # B, Y, Z, X
+        return self.vox.occ_centermask(lidars_points_ref, radius=radius) # B, Y, Z, X
+
+    def forward_trainval(self, cameras_image, cameras_extrin, cameras_intrin,
+            lidars_points, lidars_extrin,
+            cameras_annos=None, lidars_annos=None
+        ):
+        # 准备centermask的GT    
+        assert lidars_points is not None \
+            and lidars_extrin is not None, "lidars_points and lidars_extrin must be provided for training"
+        # 点云聚合
+        B, S, C, H, W = cameras_image.shape
+
+        occ_targets = self.make_occ_targets(B, lidars_points, lidars_extrin)
 
         self.prepare_forward(cameras_image, cameras_extrin, cameras_intrin)
 
@@ -199,8 +205,8 @@ class YOLOXOCC(nn.Module):
         # bev augment
         if self.training and self.bev_augment is not None:
             # bev数据增强
-            occ_centermask_target, datas \
-                = self.bev_augment(occ_centermask_target, datas)
+            occ_targets, datas \
+                = self.bev_augment(occ_targets, datas)
 
         # bev forward
         datas = self._forward_bev_(datas)
@@ -227,7 +233,7 @@ class YOLOXOCC(nn.Module):
             occ_total_loss = 0
             # occ main loss
             occ_losses \
-                = self.occ_head.get_losses(occ_pred, occ_centermask_target, valid_vox_mask)
+                = self.occ_head.get_losses(occ_pred, occ_targets, valid_vox_mask)
             occ_total_loss += occ_losses["total_loss"]
             for key in occ_losses:
                 new_key = "occ_" + key
@@ -237,7 +243,7 @@ class YOLOXOCC(nn.Module):
             aux_occ_total_loss = 0
             for aux_occ_preds in aux_occ_preds_list:
                 aux_occ_losses \
-                    = self.occ_head.get_losses(aux_occ_preds, occ_centermask_target, valid_vox_mask, uncertainty=False)
+                    = self.occ_head.get_losses(aux_occ_preds, occ_targets, valid_vox_mask, uncertainty=False)
                 aux_occ_total_loss += 0.1 * aux_occ_losses["total_loss"]
 
             if len(aux_occ_preds_list) > 0:
@@ -253,7 +259,7 @@ class YOLOXOCC(nn.Module):
 
         else:
             outputs = {}
-            occ_metrics = self.occ_head.get_metrics(occ_pred, occ_centermask_target, valid_vox_mask)
+            occ_metrics = self.occ_head.get_metrics(occ_pred, occ_targets, valid_vox_mask)
             
             for key in occ_metrics:
                 new_key = "occ_" + key

@@ -17,3 +17,4 @@ from .setup_env import *
 from .vox import VoxUtil
 from .allreduce_norm import *
 from .weights import *
+from .muon import *

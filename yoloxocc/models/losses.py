@@ -5,7 +5,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
 
 # bce loss
 class MaskedBCEWithLogitsLoss(torch.nn.Module):
@@ -46,7 +45,7 @@ class HeatmapLoss(nn.Module):
         super().__init__()
         self.loss_fn = loss_fn
 
-    def forward(self, pred, target, mask=None, channel_weight=None, debug=False):
+    def forward(self, pred, target, mask=None, channel_weight=None):
         assert pred.shape == target.shape, \
             f"expect {pred.shape} == {target.shape}"
 
@@ -64,17 +63,6 @@ class HeatmapLoss(nn.Module):
         for c in range(C):
             loss += self.loss_fn(pred[:, c], target[:, c], mask[:, c]) * channel_weight[c]
 
-            if debug: 
-                import cv2
-                import numpy as np
-                import os
-                if not os.path.exists("debug"):
-                    os.mkdir("debug")
-                heatmap_pred = (pred[0, c].detach().cpu().numpy()*255).astype(np.uint8)
-                cv2.imwrite(f"debug/heatmap_pred_{c}.png", heatmap_pred)
-                heatmap_target = (target[0, c].cpu().numpy()*255).astype(np.uint8)
-                cv2.imwrite(f"debug/heatmap_target_{c}.png", heatmap_target)
-                
         return loss / C
 
 # gaussian l1 loss

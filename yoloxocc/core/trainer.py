@@ -93,7 +93,7 @@ class Trainer:
     def trainning_iter(self):
         data_time = 0
         iter_start_time = time.time()
-        self.optimizer.zero_grad()
+        self.model.zero_grad(set_to_none=True)
         for _ in range(self.exp.grad_accum):
             data_start_time = time.time()
 
@@ -112,15 +112,18 @@ class Trainer:
             
             self.scaler.scale(loss).backward()
 
-        self.scaler.step(self.optimizer)
+        for opt in self.optimizers:
+            self.scaler.step(opt)
         self.scaler.update()
 
         if self.use_model_ema:
             self.ema_model.update(self.model)
 
         lr = self.lr_scheduler.update_lr(self.progress_in_iter + 1)
-        for param_group in self.optimizer.param_groups:
+        for param_group in self.optimizers[0].param_groups: # normal optimizer
             param_group["lr"] = lr
+        for param_group in self.optimizers[1].param_groups: # muon optimizer
+            param_group["lr"] = lr * 10
 
         iter_end_time = time.time()
         self.meter.update(
@@ -150,7 +153,7 @@ class Trainer:
         origin_model.to(self.device)
 
         # solver related init
-        self.optimizer = self.exp.get_optimizer(self.args.batch_size)
+        self.optimizers = self.exp.get_optimizers(self.args.batch_size)
 
         # value of epoch will be set in `resume_train`
         model = self.resume_train(origin_model)
@@ -336,7 +339,8 @@ class Trainer:
             ckpt = torch.load(ckpt_file, map_location=self.device, weights_only=True)
             # resume the model/optimizer state dict
             model.load_state_dict(ckpt["model"])
-            self.optimizer.load_state_dict(ckpt["optimizer"])
+            self.optimizers[0].load_state_dict(ckpt["optimizer"])
+            self.optimizers[1].load_state_dict(ckpt["optimizer_muon"])            
             self.best_metric_mean = ckpt.pop("best_metric_mean", 0)
 
             # resume the training states variables
@@ -402,7 +406,8 @@ class Trainer:
             ckpt_state = {
                 "start_epoch": self.epoch + 1,
                 "model": save_model.state_dict(),
-                "optimizer": self.optimizer.state_dict(),
+                "optimizer": self.optimizers[0].state_dict(),
+                "optimizer_muon": self.optimizers[1].state_dict(),
                 "best_metric_mean": self.best_metric_mean,
             }
             save_checkpoint(
